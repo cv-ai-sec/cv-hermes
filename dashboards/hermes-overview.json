@@ -73,9 +73,36 @@
     },
     {
       "id": 5,
+      "title": "Notes generated (word count)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "expr": "sum(sum_over_time({job=\"hermes-agent\", event=\"note_generated\"} | json | unwrap word_count [5m]))",
+          "refId": "A",
+          "legendFormat": "words"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Task status changes",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "targets": [
+        {
+          "expr": "sum by (task_status) (count_over_time({job=\"hermes-agent\", event=\"task_status_change\"} | json [5m]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
       "title": "Live log stream",
       "type": "logs",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 16 },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 24 },
       "datasource": { "type": "loki", "uid": "Loki" },
       "targets": [
         { "expr": "{job=\"hermes-agent\"}", "refId": "A" }

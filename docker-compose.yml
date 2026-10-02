@@ -16,6 +16,12 @@ services:
       - ./workspace:/workspace:Z
       - ./config:/app/config:ro,Z
       - hermes-logs:/var/log/hermes:Z
+      # Output of the summarize/task pipeline: generated notes and the local SQLite
+      # task DB. If hermes-agent fails to start with a permission error writing here,
+      # the bind-mounted host directory probably isn't owned by UID 10001 (the
+      # container's non-root user) — see docs/INSTALL.md's troubleshooting section.
+      - ./notes:/app/notes:Z
+      - ./data:/app/data:Z
     networks:
       - agent-net
     extra_hosts:

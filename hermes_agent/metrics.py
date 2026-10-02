@@ -3,9 +3,10 @@
 Every event is one JSON object per line, written to stdout and to
 HERMES_LOG_FILE. Promtail tails the file and ships it to Loki; the field
 names here (event, latency_ms, tokens_prompt, tokens_completion, tool_name,
-error_type) are a contract with config/promtail-config.yaml's pipeline
-stages and dashboards/hermes-overview.json's queries — change a field name
-in both places together.
+error_type, task_id, task_status, word_count) are a contract with
+config/promtail-config.yaml's pipeline stages and
+dashboards/hermes-overview.json's queries — change a field name in both
+places together.
 
 Never pass raw user message content, tokens, or secrets into `extra` —
 these lines get shipped verbatim into the lab's own Loki instance and then
@@ -39,6 +40,9 @@ class _JsonFormatter(logging.Formatter):
             "tool_name",
             "error_type",
             "guild_id",
+            "task_id",
+            "task_status",
+            "word_count",
         ):
             value = getattr(record, key, None)
             if value is not None:

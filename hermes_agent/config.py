@@ -29,6 +29,7 @@ class Settings:
 
         # --- Secrets: environment only, never from YAML ---
         self.discord_token = os.environ.get("DISCORD_TOKEN", "")
+        self.revolt_token = os.environ.get("REVOLT_TOKEN", "")
         self.llm_api_key = os.environ.get("LLM_API_KEY", "")
 
         # --- Non-secret config: env override > yaml > hardcoded fallback ---
@@ -43,14 +44,29 @@ class Settings:
         self.llm_max_tokens = llm_cfg.get("max_tokens", 1024)
         self.llm_temperature = llm_cfg.get("temperature", 0.4)
 
+        # Shared across every chat platform — a message is addressed the same way
+        # whether it arrives via Discord or Revolt.
+        chat_cfg = yaml_cfg.get("chat", {})
+        self.command_prefix = chat_cfg.get("command_prefix", "!hermes ")
+        self.mention_trigger = chat_cfg.get("mention_trigger", True)
+
         discord_cfg = yaml_cfg.get("discord", {})
-        self.command_prefix = discord_cfg.get("command_prefix", "!hermes ")
-        self.mention_trigger = discord_cfg.get("mention_trigger", True)
         allowed = os.environ.get("DISCORD_ALLOWED_GUILD_IDS", "")
         if allowed.strip():
             self.allowed_guild_ids = {int(g) for g in allowed.split(",") if g.strip()}
         else:
             self.allowed_guild_ids = set(discord_cfg.get("allowed_guild_ids", []) or [])
+
+        revolt_cfg = yaml_cfg.get("revolt", {})
+        revolt_allowed = os.environ.get("REVOLT_ALLOWED_CHANNEL_IDS", "")
+        if revolt_allowed.strip():
+            self.revolt_allowed_channel_ids = {
+                c.strip() for c in revolt_allowed.split(",") if c.strip()
+            }
+        else:
+            self.revolt_allowed_channel_ids = set(
+                revolt_cfg.get("allowed_channel_ids", []) or []
+            )
 
         workspace_cfg = yaml_cfg.get("workspace", {})
         self.workspace_root = os.environ.get(
@@ -60,17 +76,25 @@ class Settings:
 
         self.allowed_tools = set((yaml_cfg.get("tools", {}) or {}).get("allowed", []))
 
+        # --- Task automation pipeline (summarize/task commands) ---
+        tasks_cfg = yaml_cfg.get("tasks", {})
+        self.task_db_path = os.environ.get(
+            "TASK_DB_PATH", tasks_cfg.get("db_path", "/app/data/tasks.db")
+        )
+        self.notes_dir = os.environ.get("NOTES_DIR", tasks_cfg.get("notes_dir", "/app/notes"))
+
     def validate(self) -> None:
         missing = [
             name
-            for name, value in (
-                ("DISCORD_TOKEN", self.discord_token),
-                ("LLM_MODEL", self.llm_model),
-            )
+            for name, value in (("LLM_MODEL", self.llm_model),)
             if not value
         ]
         if missing:
             raise RuntimeError(
                 f"Missing required settings: {', '.join(missing)}. "
                 "Copy .env.example to .env and fill in real values."
+            )
+        if not self.discord_token and not self.revolt_token:
+            raise RuntimeError(
+                "No chat platform configured — set DISCORD_TOKEN and/or REVOLT_TOKEN in .env."
             )

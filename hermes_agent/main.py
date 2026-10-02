@@ -1,121 +1,88 @@
-"""Hermes Agent: a sandboxed Discord bot backed by an OpenAI-compatible LLM endpoint.
+"""Hermes Agent entrypoint.
 
-Responds to a configured prefix command and/or @mentions, forwards the
-message to the configured LLM backend, and logs structured events (latency,
-token usage, tool calls, errors) for the Loki/Grafana stack running
-alongside it in docker-compose.yml.
+Wires one or both chat-platform adapters (Discord, optionally Revolt) to the
+shared, platform-agnostic command router in hermes_agent/bot/commands.py.
+Which adapters actually start depends only on which tokens are present in
+.env — see config.py.
 """
+
+from __future__ import annotations
 
 import asyncio
 
-import discord
-from openai import APIError, OpenAI
-
 from . import metrics
+from .adapters.discord_adapter import DiscordAdapter
+from .bot.commands import CommandRouter
 from .config import Settings
-from .tools import WorkspaceError, WorkspaceTools
+from .services.notes_service import NotesService
+from .services.task_db import TaskDB
+from .services.transcript_service import TranscriptService
+from .tools import WorkspaceTools
 
-MAX_DISCORD_MESSAGE = 2000
 
-
-def build_system_prompt() -> str:
-    return (
-        "You are Hermes, a helpful assistant running in a sandboxed lab environment. "
-        "You have no access outside your workspace directory and no tools beyond the "
-        "ones explicitly provided to you."
+async def _run(settings: Settings) -> None:
+    tools = WorkspaceTools(
+        root=settings.workspace_root,
+        max_file_bytes=settings.max_file_bytes,
+        allowed_tools=settings.allowed_tools,
+    )
+    task_db = TaskDB(settings.task_db_path)
+    transcript_service = TranscriptService()
+    notes_service = NotesService(
+        llm_api_base=settings.llm_api_base,
+        llm_api_key=settings.llm_api_key,
+        llm_model=settings.llm_model,
+        llm_timeout=settings.llm_timeout,
+        notes_dir=settings.notes_dir,
     )
 
+    router = CommandRouter(
+        settings=settings,
+        tools=tools,
+        task_db=task_db,
+        transcript_service=transcript_service,
+        notes_service=notes_service,
+    )
 
-class HermesClient(discord.Client):
-    def __init__(self, settings: Settings, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.settings = settings
-        self.llm = OpenAI(base_url=settings.llm_api_base, api_key=settings.llm_api_key)
-        self.tools = WorkspaceTools(
-            root=settings.workspace_root,
-            max_file_bytes=settings.max_file_bytes,
-            allowed_tools=settings.allowed_tools,
+    adapters = []
+
+    if settings.discord_token:
+        discord_adapter = DiscordAdapter(
+            token=settings.discord_token,
+            command_prefix=settings.command_prefix,
+            mention_trigger=settings.mention_trigger,
+            allowed_guild_ids=settings.allowed_guild_ids,
+        )
+        discord_adapter.on_message = router.handle
+        adapters.append(discord_adapter)
+
+    if settings.revolt_token:
+        # Imported lazily so a Discord-only deployment never needs the revolt.py/
+        # aiohttp dependency chain to actually import cleanly.
+        from .adapters.revolt_adapter import RevoltAdapter
+
+        revolt_adapter = RevoltAdapter(
+            token=settings.revolt_token,
+            command_prefix=settings.command_prefix,
+            mention_trigger=settings.mention_trigger,
+            allowed_channel_ids=settings.revolt_allowed_channel_ids,
+        )
+        revolt_adapter.on_message = router.handle
+        adapters.append(revolt_adapter)
+
+    if not adapters:
+        raise RuntimeError(
+            "No chat platform configured — set DISCORD_TOKEN and/or REVOLT_TOKEN in .env."
         )
 
-    async def on_ready(self) -> None:
-        metrics.log_event("startup", message=f"logged in as {self.user} ({self.user.id})")
-
-    def _is_addressed(self, message: discord.Message) -> str | None:
-        content = message.content
-        if content.startswith(self.settings.command_prefix):
-            return content[len(self.settings.command_prefix):].strip()
-        if self.settings.mention_trigger and self.user in message.mentions:
-            return content.replace(f"<@{self.user.id}>", "").strip()
-        return None
-
-    async def on_message(self, message: discord.Message) -> None:
-        if message.author.bot:
-            return
-
-        if (
-            self.settings.allowed_guild_ids
-            and message.guild
-            and message.guild.id not in self.settings.allowed_guild_ids
-        ):
-            return
-
-        prompt = self._is_addressed(message)
-        if not prompt:
-            return
-
-        guild_id = message.guild.id if message.guild else None
-
-        with metrics.task_latency(guild_id=guild_id):
-            try:
-                async with message.channel.typing():
-                    reply = await asyncio.to_thread(self._call_llm, prompt, guild_id)
-            except APIError as exc:
-                metrics.log_error("llm_api_error", str(exc))
-                await message.reply("Sorry, the LLM backend returned an error. Check the logs.")
-                return
-            except WorkspaceError as exc:
-                metrics.log_error("workspace_error", str(exc))
-                await message.reply(f"Tool error: {exc}")
-                return
-            except Exception as exc:  # noqa: BLE001 - last-resort guard, always logged
-                metrics.log_error("unhandled_exception", str(exc))
-                await message.reply("Sorry, something went wrong. Check the logs.")
-                return
-
-        for i in range(0, len(reply), MAX_DISCORD_MESSAGE):
-            await message.reply(reply[i : i + MAX_DISCORD_MESSAGE])
-
-    def _call_llm(self, prompt: str, guild_id: int | None) -> str:
-        response = self.llm.chat.completions.create(
-            model=self.settings.llm_model,
-            messages=[
-                {"role": "system", "content": build_system_prompt()},
-                {"role": "user", "content": prompt},
-            ],
-            max_tokens=self.settings.llm_max_tokens,
-            temperature=self.settings.llm_temperature,
-            timeout=self.settings.llm_timeout,
-        )
-        usage = response.usage
-        if usage:
-            metrics.log_token_usage(
-                tokens_prompt=usage.prompt_tokens,
-                tokens_completion=usage.completion_tokens,
-                guild_id=guild_id,
-            )
-        return response.choices[0].message.content or "(empty response)"
+    await asyncio.gather(*(adapter.start() for adapter in adapters))
 
 
 def main() -> None:
     settings = Settings()
     settings.validate()
     metrics.configure_logging(settings.log_level, settings.log_file)
-
-    intents = discord.Intents.default()
-    intents.message_content = True
-
-    client = HermesClient(settings, intents=intents)
-    client.run(settings.discord_token, log_handler=None)
+    asyncio.run(_run(settings))
 
 
 if __name__ == "__main__":

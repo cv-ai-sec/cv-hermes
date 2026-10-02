@@ -6,10 +6,17 @@ log_level: INFO
 log_format: json          # json | text — keep "json" so Promtail's pipeline stages parse cleanly
 log_file: /var/log/hermes/hermes.jsonl
 
-discord:
+# Shared across every chat platform — a message is addressed the same way whether
+# it arrives via Discord or Revolt.
+chat:
   command_prefix: "!hermes "
   mention_trigger: true    # respond when @mentioned in addition to the prefix command
+
+discord:
   allowed_guild_ids: []    # empty = allow any guild the bot is invited to
+
+revolt:
+  allowed_channel_ids: []  # empty = allow any channel the bot is in
 
 llm:
   request_timeout_seconds: 60
@@ -27,3 +34,9 @@ tools:
     - read_workspace_file
     - write_workspace_file
     - list_workspace_files
+
+tasks:
+  # SQLite task DB + generated notes for the `summarize`/`task` commands. Paths are
+  # inside the container; env vars TASK_DB_PATH/NOTES_DIR override these if set.
+  db_path: /app/data/tasks.db
+  notes_dir: /app/notes

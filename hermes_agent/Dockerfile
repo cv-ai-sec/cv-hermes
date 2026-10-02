@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . /app/hermes_agent
 
-RUN mkdir -p /workspace /var/log/hermes \
+RUN mkdir -p /workspace /var/log/hermes /app/notes /app/data \
     && chown -R hermes:hermes /workspace /var/log/hermes /app
 
 USER hermes

@@ -122,12 +122,18 @@ Skip this step if you're pointing `LLM_API_BASE` at a cloud provider instead.
    ```powershell
    New-NetFirewallRule -DisplayName "LM Studio - VM only" -Direction Inbound -Protocol TCP `
      -LocalPort 1234 -RemoteAddress 192.168.56.0/24 -Action Allow
-   New-NetFirewallRule -DisplayName "LM Studio - block other inbound" -Direction Inbound -Protocol TCP `
-     -LocalPort 1234 -RemoteAddress Any -Action Block
    ```
    (Run as Administrator. Adjust `192.168.56.0/24` if your host-only network uses a different
    range. Skip this if you already added it for `ai-cybersecurity-devops-lab` — one rule covers
    both, since both VMs sit on the same host-only subnet.)
+
+   **Don't also add a second "block everyone else" rule.** An earlier version of this guide did,
+   and it caused a real, hard-to-diagnose outage: Windows Firewall gives Block rules precedence
+   over Allow rules whenever both match the same traffic, regardless of specificity — so a
+   `Block` rule scoped to `RemoteAddress Any` also matches (and silently defeats) the `Allow` rule
+   above, since `Any` includes `192.168.56.0/24` too. The single Allow rule is sufficient on its
+   own: Windows Firewall already denies everything not explicitly allowed. Full incident writeup
+   in this workspace's local-only `Projects\firewall-audit-log\CHANGELOG.md`.
 
 ## 8. Configure environment and bring up the stack
 
@@ -136,7 +142,9 @@ cp .env.example .env
 ```
 
 Edit `.env` and fill in `DISCORD_TOKEN`/`DISCORD_APPLICATION_ID` (from the
-[Discord Developer Portal](https://discord.com/developers/applications)), confirm
+[Discord Developer Portal](https://discord.com/developers/applications)) — or `REVOLT_TOKEN`
+instead/as well, if you want the bot on Revolt too (see
+`hermes_agent/adapters/revolt_adapter.py`'s module docstring for a caveat on that adapter). Confirm
 `HOST_LM_STUDIO_IP` matches your host-only adapter's IP (check with
 `ip addr show | grep 192.168.56` inside the VM), and change `GRAFANA_ADMIN_PASSWORD` from its
 placeholder.
@@ -199,6 +207,15 @@ dashboard is auto-provisioned.
 - **Bot never responds in Discord, no errors in logs:** confirm the bot has "Message Content
   Intent" enabled in the Discord Developer Portal (**Bot → Privileged Gateway Intents**) — without
   it, `discord.py` silently receives messages with empty `content`.
+- **`hermes-agent` fails to start with a permission error writing to `/app/notes` or `/app/data`:**
+  the bind-mounted host directories (`./notes`, `./data`) need to be writable by the container's
+  non-root UID (`10001`). If `docker compose up` created them as root on first run, fix ownership:
+  `sudo chown -R 10001:10001 notes data workspace` (the same issue can affect `./workspace` for the
+  same reason).
+- **`summarize <url>` always replies `[Task Failed] No 'en' transcript/captions available`:** this is
+  expected for audio-only videos or ones without English captions — Whisper-based transcription for
+  that case isn't implemented yet (see `docs/ARCHITECTURE.md`). Try a video with existing captions to
+  confirm the pipeline itself works.
 - **Can't reach Grafana from Windows at all:** confirm you're using the VM's host-only IP (step 10),
   not `127.0.0.1` — there's no NAT port-forward for Grafana by design (step 4). Also re-check
   `sudo firewall-cmd --list-rich-rules` on the VM includes the Grafana allow rule for your actual

@@ -23,6 +23,10 @@ not just on the first commit.
 - **Sandboxed file tools.** `hermes_agent/tools.py` resolves and verifies every path the LLM asks to
   read/write against `./workspace` before touching disk, rejecting anything that would escape it —
   the one place a prompt-injected response could attempt a path traversal.
+- **Task DB is deliberately not a real external integration.** `hermes_agent/services/task_db.py` is
+  a local SQLite table, not an AppFlowy/Affine connection — no API credentials, no network calls, no
+  dependency on either app actually running. See `docs/ARCHITECTURE.md`'s Trust boundaries section
+  for the `summarize` command's URL-fetching and LLM-output-to-disk risk reasoning too.
 - **Every container hardened.** `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`,
   `read_only: true` root filesystem, non-root user, SELinux `:Z` volume labels — on every service in
   `docker-compose.yml`, not just hermes-agent.
@@ -44,12 +48,15 @@ not just on the first commit.
    absolute local paths (`C:\Users\<name>\...`, `D:\Ai projects\...`), real VM/LAN IP addresses, or
    hostnames leaking into config files, comments, or log fixtures. Use relative paths and env vars
    instead.
-5. **No real log or runtime artifacts.** `workspace/`, `hermes-logs`/`loki-data`/`grafana-data`
-   volumes, and `*.log`/`*.jsonl` files are git-ignored — verify none were force-added, and that any
-   example log line checked into a doc is synthetic, not pulled from a real run.
+5. **No real log or runtime artifacts.** `workspace/`, `notes/`, `data/`, `hermes-logs`/
+   `loki-data`/`grafana-data` volumes, and `*.log`/`*.jsonl` files are git-ignored — verify none were
+   force-added, and that any example log line or generated note checked into a doc is synthetic, not
+   pulled from a real run.
 6. **New dependencies are permissively licensed.** Check the license of anything added to
-   `hermes_agent/requirements.txt` before adding it (discord.py is Apache-2.0, openai-python is
-   Apache-2.0 — keep new additions MIT/Apache-2.0/BSD-equivalent).
+   `hermes_agent/requirements.txt` before adding it (discord.py and aiohttp are Apache-2.0, yt-dlp is
+   Unlicense/public-domain — keep new additions MIT/Apache-2.0/BSD-equivalent; verify `revolt.py`'s
+   actual license on whatever version installs, since this project added it without confirming
+   against a live source).
 
 ## If you find something real
 

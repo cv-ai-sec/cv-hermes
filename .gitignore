@@ -7,11 +7,14 @@
 keys/
 
 # --- Runtime data & logs ---
-data/
 *.log
 logs/
 workspace/*
 !workspace/.gitkeep
+data/*
+!data/.gitkeep
+notes/*
+!notes/.gitkeep
 
 # --- Loki / Grafana runtime state (bind-mounted volumes) ---
 loki-data/
