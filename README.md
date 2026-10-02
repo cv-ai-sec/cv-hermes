@@ -76,6 +76,24 @@ If you later add a tool to Hermes that should never phone home at all, give it
 its own container on `obs-net` (or a third, equally locked-down network)
 rather than loosening `agent-net`.
 
+### Running alongside other labs on the same VM
+
+If this stack shares a VM with another project (e.g.
+[`ai-cybersecurity-devops-lab`](../ai-cybersecurity-devops-lab)), check both
+for overlap before bringing both up at once:
+
+| Setting | cv-hermes | ai-cybersecurity-devops-lab |
+|---|---|---|
+| Grafana / dashboard host port | `3000` (override with `GRAFANA_PORT` in `.env`) | open-webui on `3000` (override with `OPEN_WEBUI_PORT`) |
+| Loki host port | not published (internal-only) | `3100` (override with `LOKI_PORT`) |
+| Docker network subnet | `obs-net` = `172.28.9.0/24` | `lab_internal` = `172.28.1.0/24` |
+
+The subnets don't overlap, so no change needed there. The **Grafana port does
+conflict** with the other lab's default — set `GRAFANA_PORT` in `cv-hermes`'s
+`.env` to something else (e.g. `3001`) if both stacks run at the same time,
+and update `LOCAL_SUBNET`'s firewalld rule in
+`scripts/00_setup_rocky9_host.sh` to the port you actually chose.
+
 ## Security hardening applied
 
 - **No secrets in files.** `.env` is git-ignored; only `.env.example` with
@@ -136,6 +154,10 @@ Edit `.env` and fill in:
 - `LLM_API_BASE` / `LLM_API_KEY` / `LLM_MODEL` for whatever OpenAI-compatible
   endpoint you're using (a local model server, or a cloud provider)
 - `GRAFANA_ADMIN_PASSWORD` — change this from the placeholder before first boot
+- `GRAFANA_PORT` — only if `3000` is already in use on this VM by another
+  project (see "Running alongside other labs on the same VM" above); if you
+  change it here, also update `GRAFANA_PORT` at the top of
+  `scripts/00_setup_rocky9_host.sh` before running it
 
 `.env` is git-ignored. Never commit it.
 
@@ -154,7 +176,8 @@ docker compose logs -f hermes-agent
 
 ### 5. Access Grafana
 
-From a machine on `LOCAL_SUBNET`, open `http://<VM_IP>:3000`, log in with
+From a machine on `LOCAL_SUBNET`, open `http://<VM_IP>:<GRAFANA_PORT>` (default
+`3000`), log in with
 `GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD` from your `.env`. The **Hermes
 Agent Overview** dashboard (`dashboards/hermes-overview.json`) is
 auto-provisioned and shows:

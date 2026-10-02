@@ -15,9 +15,14 @@
 set -euo pipefail
 
 # --- Configuration you should check before running ---------------------------
-# The subnet allowed to reach Grafana on port 3000. Default assumes a typical
-# home/lab /24; change this to match your actual LAN or VM host-only network.
+# The subnet allowed to reach Grafana. Default assumes a typical home/lab /24;
+# change this to match your actual LAN or VM host-only network.
 LOCAL_SUBNET="${LOCAL_SUBNET:-192.168.1.0/24}"
+
+# Must match GRAFANA_PORT in .env (default 3000). Change this if 3000 is
+# already taken on this VM — e.g. ai-cybersecurity-devops-lab's open-webui
+# also defaults to host port 3000 — and set the same value in both places.
+GRAFANA_PORT="${GRAFANA_PORT:-3000}"
 
 # Must match the `obs-net` subnet in docker-compose.yml. Loki/Promtail/Grafana
 # live here and have no legitimate reason to reach the internet — see
@@ -71,9 +76,9 @@ echo "==> Configuring firewalld"
 firewall-cmd --permanent --add-service=ssh
 
 # Grafana: allow only from the local subnet, not the world.
-firewall-cmd --permanent --zone=public --add-rich-rule="rule family='ipv4' source address='${LOCAL_SUBNET}' port port='3000' protocol='tcp' accept"
-# Explicitly drop any other inbound attempt at 3000 that didn't match the rule above.
-firewall-cmd --permanent --zone=public --remove-port=3000/tcp 2>/dev/null || true
+firewall-cmd --permanent --zone=public --add-rich-rule="rule family='ipv4' source address='${LOCAL_SUBNET}' port port='${GRAFANA_PORT}' protocol='tcp' accept"
+# Explicitly drop any other inbound attempt at this port that didn't match the rule above.
+firewall-cmd --permanent --zone=public --remove-port="${GRAFANA_PORT}/tcp" 2>/dev/null || true
 
 # Observability stack (Loki/Promtail/Grafana) has no legitimate reason to
 # reach the internet — block its egress outright at the host firewall rather
@@ -87,7 +92,7 @@ firewall-cmd --permanent --direct --add-rule ipv4 filter FORWARD 0 \
 firewall-cmd --reload
 
 echo "==> Done."
-echo "    Grafana will be reachable at http://<VM_IP>:3000 from ${LOCAL_SUBNET} only."
+echo "    Grafana will be reachable at http://<VM_IP>:${GRAFANA_PORT} from ${LOCAL_SUBNET} only."
 echo "    The observability network (${OBS_NET_SUBNET}) cannot reach the internet."
 echo "    hermes-agent's own network (agent-net) is left open for outbound Discord/LLM traffic."
 echo "    Next: cp .env.example .env, fill in real values, then: docker compose up -d"

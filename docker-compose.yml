@@ -81,7 +81,9 @@ services:
     ports:
       # Bound to all interfaces at the Docker level; firewalld on the VM restricts actual
       # reachability to the local subnet only — see scripts/00_setup_rocky9_host.sh.
-      - "3000:3000"
+      # Override GRAFANA_PORT in .env if 3000 is already taken on this VM — e.g.
+      # ai-cybersecurity-devops-lab's open-webui also defaults to host port 3000.
+      - "${GRAFANA_PORT:-3000}:3000"
     volumes:
       - grafana-data:/var/lib/grafana:Z
       - ./config/grafana-datasource.yaml:/etc/grafana/provisioning/datasources/loki.yaml:ro,Z
