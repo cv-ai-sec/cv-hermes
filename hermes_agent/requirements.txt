@@ -11,14 +11,19 @@ PyYAML==6.0.2
 # failing, bumping this to the latest release is usually the first thing to try.
 yt-dlp==2024.10.7
 
-# --- Optional second chat platform (Revolt) ---
-# Only imported/used if REVOLT_TOKEN is set in .env (see hermes_agent/main.py) — but
-# still installed unconditionally since Docker images can't conditionally install deps
-# at runtime. Verify against whatever version actually installs (`pip show revolt.py`);
-# see hermes_agent/adapters/revolt_adapter.py's module docstring for why.
-# No explicit aiohttp pin here on purpose: revolt.py==0.1.6 hard-pins aiohttp==3.7.4.post0
-# exactly, and discord.py's own requirement (aiohttp<4,>=3.7.4) is loose enough to accept
-# that version too — pinning aiohttp ourselves to anything newer makes pip's resolver fail
-# with a hard conflict (confirmed: pip install errors "ResolutionImpossible" against
-# aiohttp==3.10.10). Let revolt.py's pin win.
-revolt.py==0.1.6
+# --- Revolt chat platform: deliberately NOT installed (accepted gap, not an oversight) ---
+# revolt.py==0.1.6 (the only Python Revolt library readily available at the time this was
+# built) hard-pins dependencies incompatible with this project's other requirements:
+# aiohttp==3.7.4.post0 exactly (discord.py needs aiohttp<4,>=3.7.4, which that satisfies,
+# so not the blocker) AND typing-extensions==4.0.1 exactly, which openai==1.51.0's own
+# requirement (typing-extensions>=4.11,<5) flatly conflicts with — confirmed via pip's
+# "ResolutionImpossible" on two separate attempts (aiohttp first, then typing-extensions).
+# revolt.py appears unmaintained against current dependency versions, not just strict.
+#
+# The adapter code for Revolt still exists (hermes_agent/adapters/revolt_adapter.py) and
+# hermes_agent/main.py still checks REVOLT_TOKEN and raises a clear error if it's set
+# without the package installed — this is scaffolding for later, not dead weight to clean
+# up. Re-enabling Revolt means either finding a currently-maintained Revolt library, or
+# installing revolt.py with `--no-deps` and manually supplying compatible versions of its
+# actual sub-dependencies (untested here — see the module docstring in revolt_adapter.py).
+# Discord-only is fully unaffected either way.

@@ -2,7 +2,7 @@
 
 ```mermaid
 graph LR
-  A[Discord / Revolt Gateway] <-->|via NAT adapter| B[Hermes Agent]
+  A[Discord Gateway] <-->|via NAT adapter| B[Hermes Agent]
   B -->|chat completion| C[LM Studio on Windows host]
   B -->|summarize command| Y[yt-dlp: transcript only]
   Y --> B
@@ -23,7 +23,7 @@ model.
 
 | Component | Role | Network exposure |
 |---|---|---|
-| Hermes Agent (`hermes_agent/`) | discord.py/revolt.py bot + OpenAI-compatible LLM client; sandboxed file tools; transcript/notes/task pipeline | `agent-net` — the one container allowed outbound internet, to the Discord/Revolt gateway(s), LM Studio on the Windows host, and YouTube (for transcript fetching via `yt-dlp`) |
+| Hermes Agent (`hermes_agent/`) | discord.py bot + OpenAI-compatible LLM client; sandboxed file tools; transcript/notes/task pipeline | `agent-net` — the one container allowed outbound internet, to the Discord Gateway, LM Studio on the Windows host, and YouTube (for transcript fetching via `yt-dlp`) |
 | Loki (`config/loki-config.yaml`) | Log storage | `obs-net` only — no internet, see Trust boundaries |
 | Promtail (`config/promtail-config.yaml`) | Tails the shared `hermes-logs` volume, ships lines to Loki | `obs-net` only — no internet |
 | Grafana (`dashboards/hermes-overview.json`) | Dashboards over Loki: errors/min, task latency p50/p95, token usage, tool calls, live log stream | `obs-net` + one published port (`GRAFANA_PORT`), reached via the VM's host-only IP and firewalld-restricted to `LOCAL_SUBNET` — no NAT port-forward (see `docs/INSTALL.md` for why) |
@@ -33,13 +33,19 @@ model.
 
 ## Chat platform adapters
 
-Both Discord and Revolt are wired through one shared interface
-(`hermes_agent/adapters/base.py`'s `ChatAdapter`), so `hermes_agent/bot/commands.py` contains the
-actual command logic exactly once, regardless of which platform a message arrived from. Discord is
-always available; Revolt only starts if `REVOLT_TOKEN` is set in `.env` — leaving it unset has zero
-effect on the Discord-only path. See `hermes_agent/adapters/revolt_adapter.py`'s module docstring
-for a caveat on that adapter's API surface (written without live access to `revolt.py`'s current
-docs — verify against whatever version actually installs before relying on it).
+Built around one shared interface (`hermes_agent/adapters/base.py`'s `ChatAdapter`), so
+`hermes_agent/bot/commands.py` contains the actual command logic exactly once, regardless of which
+platform a message arrived from — adding a platform later means writing one new adapter module, not
+touching command logic.
+
+**Discord is fully supported.** **Revolt is scaffolded but not currently functional** — the adapter
+code exists (`hermes_agent/adapters/revolt_adapter.py`), but `revolt.py` (the only readily-available
+Python Revolt library at the time this was built) hard-pins dependencies (`aiohttp==3.7.4.post0`,
+`typing-extensions==4.0.1`) that conflict with `openai`'s own requirements — confirmed via two
+separate `pip install` failures, not a style choice. This is an accepted, documented gap (see
+`hermes_agent/requirements.txt`), not dead code to clean up: setting `REVOLT_TOKEN` without the
+package installed raises a clear `RuntimeError` at startup (`hermes_agent/main.py`) rather than a
+confusing import crash, and Discord-only operation is entirely unaffected by Revolt's absence.
 
 ## The `summarize`/`task` pipeline
 
@@ -84,7 +90,7 @@ gap visible rather than hiding it behind a hang or a generic error.
 - **User-supplied URL → outbound fetch:** the `summarize <url>` command passes a user-controlled URL
   straight to `yt-dlp`, which can fetch from many sites, not only YouTube. This is an accepted,
   bounded risk rather than a gap: `hermes-agent` already has open egress on `agent-net` by design (to
-  reach Discord/Revolt and an LLM API), so a user directing it to fetch an arbitrary URL doesn't grant
+  reach Discord and an LLM API), so a user directing it to fetch an arbitrary URL doesn't grant
   any network reach it didn't already have — it can't be used to reach `obs-net` (firewalld-blocked
   from everything) or pivot anywhere `agent-net` itself can't already go.
 - **LLM-generated note content → disk:** `NotesService` writes the LLM's markdown output to disk

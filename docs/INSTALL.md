@@ -142,10 +142,10 @@ cp .env.example .env
 ```
 
 Edit `.env` and fill in `DISCORD_TOKEN`/`DISCORD_APPLICATION_ID` (from the
-[Discord Developer Portal](https://discord.com/developers/applications)) — or `REVOLT_TOKEN`
-instead/as well, if you want the bot on Revolt too (see
-`hermes_agent/adapters/revolt_adapter.py`'s module docstring for a caveat on that adapter). Confirm
-`HOST_LM_STUDIO_IP` matches your host-only adapter's IP (check with
+[Discord Developer Portal](https://discord.com/developers/applications)). Leave `REVOLT_TOKEN`
+blank — Revolt is scaffolded but not currently functional (a dependency conflict, see
+`hermes_agent/requirements.txt`); setting it without the package installed fails with a clear error
+rather than running. Confirm `HOST_LM_STUDIO_IP` matches your host-only adapter's IP (check with
 `ip addr show | grep 192.168.56` inside the VM), and change `GRAFANA_ADMIN_PASSWORD` from its
 placeholder.
 

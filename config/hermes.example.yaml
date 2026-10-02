@@ -15,6 +15,9 @@ chat:
 discord:
   allowed_guild_ids: []    # empty = allow any guild the bot is invited to
 
+# Revolt is scaffolded but not currently functional — revolt.py isn't installed due to a
+# dependency conflict with openai (see hermes_agent/requirements.txt). This config key is
+# read but has no effect until that's resolved and REVOLT_TOKEN is set.
 revolt:
   allowed_channel_ids: []  # empty = allow any channel the bot is in
 

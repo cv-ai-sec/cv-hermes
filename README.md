@@ -26,7 +26,7 @@ visible on a local dashboard, not buried in stdout.
   the environment only, never from the YAML config — `.env` is git-ignored, only `.env.example`
   with placeholders is committed. See [docs/SECURITY.md](docs/SECURITY.md).
 - **Partially air-gapped, by documented exception.** Only the `hermes-agent` container can reach
-  the internet (Discord/Revolt, the configured LLM API, and YouTube for transcript fetching);
+  the internet (Discord, the configured LLM API, and YouTube for transcript fetching);
   Loki/Promtail/Grafana are firewalld-blocked from all outbound traffic, since none of them need it.
   Full reasoning in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - **Every container hardened:** `cap_drop: [ALL]`, `no-new-privileges`, read-only root filesystem,
@@ -40,7 +40,7 @@ visible on a local dashboard, not buried in stdout.
 ## Architecture
 
 ```
-Discord/Revolt <-> Hermes Agent -> LLM API
+Discord <-> Hermes Agent -> LLM API
                         |      \
                         |       -> yt-dlp -> Notes service -> ./notes/*.md
                         |                          |
@@ -59,9 +59,9 @@ Full diagram, component table, and trust-boundary breakdown:
 | `!hermes summarize <youtube-url>` | Fetches the video's transcript (captions only, no audio transcription), generates a structured markdown note via the LLM, saves it to `./notes/`, and replies with a proof-of-work summary (word count, processing time) |
 | `!hermes task <title>` | Creates a tracked task entry (`Backlog` status) in the local SQLite task DB, no note generation |
 
-Both Discord and (optionally) Revolt are supported — see
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)'s "Chat platform adapters" section. Revolt is inactive
-unless `REVOLT_TOKEN` is set in `.env`.
+Discord is fully supported. Revolt is scaffolded but not currently functional — see
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)'s "Chat platform adapters" section for why
+(`revolt.py`'s dependencies conflict with `openai`'s, not a design choice).
 
 ## System specifications
 
@@ -88,7 +88,7 @@ unless `REVOLT_TOKEN` is set in `.env`.
 ├── config/           # hermes.example.yaml, loki/promtail/grafana provisioning
 ├── dashboards/       # hermes-overview.json — auto-provisioned Grafana dashboard
 ├── hermes_agent/      # main.py, config.py, metrics.py, tools.py, Dockerfile
-│   ├── adapters/      # ChatAdapter interface + Discord/Revolt implementations
+│   ├── adapters/      # ChatAdapter interface + Discord (Revolt scaffolded, not yet functional)
 │   ├── bot/           # commands.py — the one place command logic lives, platform-agnostic
 │   └── services/      # transcript_service.py, task_db.py, notes_service.py
 ├── scripts/          # 00_setup_rocky9_host.sh, parse_metrics.py, export_grafana_dashboards.sh

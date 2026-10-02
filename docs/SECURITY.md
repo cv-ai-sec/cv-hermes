@@ -54,9 +54,9 @@ not just on the first commit.
    pulled from a real run.
 6. **New dependencies are permissively licensed.** Check the license of anything added to
    `hermes_agent/requirements.txt` before adding it (discord.py and aiohttp are Apache-2.0, yt-dlp is
-   Unlicense/public-domain — keep new additions MIT/Apache-2.0/BSD-equivalent; verify `revolt.py`'s
-   actual license on whatever version installs, since this project added it without confirming
-   against a live source).
+   Unlicense/public-domain — keep new additions MIT/Apache-2.0/BSD-equivalent). `revolt.py` is
+   deliberately NOT installed (dependency conflict with `openai` — see `requirements.txt`); if it's
+   ever re-added, verify its actual license on whatever version installs, not assumed.
 
 ## If you find something real
 

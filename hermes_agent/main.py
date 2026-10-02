@@ -1,9 +1,14 @@
 """Hermes Agent entrypoint.
 
-Wires one or both chat-platform adapters (Discord, optionally Revolt) to the
-shared, platform-agnostic command router in hermes_agent/bot/commands.py.
-Which adapters actually start depends only on which tokens are present in
-.env — see config.py.
+Wires chat-platform adapters to the shared, platform-agnostic command router
+in hermes_agent/bot/commands.py. Which adapters actually start depends only
+on which tokens are present in .env — see config.py.
+
+Discord is fully supported. Revolt's adapter exists (hermes_agent/adapters/
+revolt_adapter.py) but revolt.py is NOT currently installed (see
+requirements.txt for why — a hard dependency conflict with openai, not a
+decision to drop Revolt support permanently) — setting REVOLT_TOKEN without
+it installed raises a clear RuntimeError below rather than an import crash.
 """
 
 from __future__ import annotations
@@ -57,9 +62,20 @@ async def _run(settings: Settings) -> None:
         adapters.append(discord_adapter)
 
     if settings.revolt_token:
-        # Imported lazily so a Discord-only deployment never needs the revolt.py/
-        # aiohttp dependency chain to actually import cleanly.
-        from .adapters.revolt_adapter import RevoltAdapter
+        # Imported lazily so a Discord-only deployment never needs revolt.py to actually
+        # import cleanly. revolt.py is NOT currently in requirements.txt — its pinned
+        # dependencies conflict with openai's (see the comment in requirements.txt for
+        # the full story) — so this will raise ImportError until that's resolved. Fail
+        # with a clear message here rather than a cryptic ModuleNotFoundError traceback.
+        try:
+            from .adapters.revolt_adapter import RevoltAdapter
+        except ImportError as exc:
+            raise RuntimeError(
+                "REVOLT_TOKEN is set, but the revolt.py package isn't installed — it's "
+                "deliberately excluded from requirements.txt due to a dependency conflict "
+                "with openai (see the comment there). Either leave REVOLT_TOKEN unset to "
+                "run Discord-only, or see requirements.txt for how to re-enable Revolt."
+            ) from exc
 
         revolt_adapter = RevoltAdapter(
             token=settings.revolt_token,

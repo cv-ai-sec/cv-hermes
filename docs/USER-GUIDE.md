@@ -79,7 +79,7 @@ level.
 ```
 `hermes agent` should no longer appear in the list.
 
-## Bot commands (Discord and/or Revolt, same syntax either way)
+## Bot commands (Discord — Revolt is scaffolded but not currently functional, see ARCHITECTURE.md)
 
 | Command | What happens |
 |---|---|
