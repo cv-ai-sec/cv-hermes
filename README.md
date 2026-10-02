@@ -91,7 +91,7 @@ Discord is fully supported. Revolt is scaffolded but not currently functional �
 │   ├── adapters/      # ChatAdapter interface + Discord (Revolt scaffolded, not yet functional)
 │   ├── bot/           # commands.py — the one place command logic lives, platform-agnostic
 │   └── services/      # transcript_service.py, task_db.py, notes_service.py
-├── scripts/          # 00_setup_rocky9_host.sh, parse_metrics.py, export_grafana_dashboards.sh
+├── scripts/          # 00_setup_rocky9_host.sh, parse_metrics.py, export_grafana_dashboards.sh, notes-viewer.html
 ├── workspace/        # sandboxed, isolated workspace for Hermes's chat file tools (git-ignored contents)
 ├── notes/            # generated markdown notes from the `summarize` command (git-ignored contents)
 └── data/             # local SQLite task DB (git-ignored contents)

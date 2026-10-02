@@ -26,8 +26,35 @@ not guaranteed — re-check here if anything below stops resolving.
 | LM Studio (LLM backend) | Running on Windows, not browsable — check its own Developer tab | Reachable from the VM at `http://host.docker.internal:1234` (mapped to `HOST_LM_STUDIO_IP`). |
 | Discord bot | Interact in whatever server you invited it to | Commands below. |
 | Raw log file | `docker compose exec hermes-agent cat /var/log/hermes/hermes.jsonl` | Same file Promtail tails — useful when a Grafana panel looks wrong. |
-| Generated notes | `./notes/` on the VM (bind-mounted from the repo root) | One `.md` file per completed `summarize` task. |
+| Generated notes | `./notes/` on the VM (bind-mounted from the repo root) | One `.md` file per completed `summarize` task. View rendered in a browser: see below. |
 | Task DB | `./data/tasks.db` on the VM (SQLite) | Inspect with `sqlite3 data/tasks.db "SELECT * FROM tasks;"` if `sqlite3` is installed on the VM, or copy the file off and open it locally. |
+
+## Viewing a generated note rendered in a browser
+
+No new container or dependency — a tiny static HTML page (`scripts/notes-viewer.html`) renders
+Markdown client-side via a JS library loaded from a CDN. Reached over an SSH tunnel, so nothing new
+is exposed on the firewall.
+
+**1. Open a tunnel from Windows** (rides over the SSH port already allowed):
+```powershell
+ssh -p 2223 -L 8000:localhost:8000 <user>@127.0.0.1
+```
+
+**2. In that same SSH session, serve the repo root** (not `notes/` — the viewer page needs to be
+served alongside `notes/`, not from inside it):
+```bash
+cd ~/cv-hermes
+python3 -m http.server 8000
+```
+
+**3. From Windows, open:**
+```
+http://localhost:8000/scripts/notes-viewer.html?file=4-EpWpZpQbXrg.md
+```
+(swap in the actual filename — check `http://localhost:8000/notes/` for the exact name, or click
+the "Browse notes/" link on the viewer page itself)
+
+`Ctrl+C` the `http.server` process when you're done — it only runs for as long as you need it.
 
 ## Graceful startup
 
