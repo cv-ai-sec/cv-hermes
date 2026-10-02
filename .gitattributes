@@ -1,0 +1,7 @@
+# Force LF line endings for files that run as scripts inside the Linux VM, regardless of
+# what OS/editor touches them on the way in — a shell script with CRLF endings fails on
+# Rocky Linux with a "bad interpreter" error.
+*.sh text eol=lf
+*.py text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
