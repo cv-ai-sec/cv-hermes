@@ -43,3 +43,8 @@ tasks:
   # inside the container; env vars TASK_DB_PATH/NOTES_DIR override these if set.
   db_path: /app/data/tasks.db
   notes_dir: /app/notes
+  # Transcripts longer than this (characters, not tokens — no tokenizer dependency for
+  # just this estimate) get truncated before reaching the LLM, to stay clear of a typical
+  # 8K-context local model's limit. Raise this if your loaded model has a larger context
+  # window. Override: MAX_TRANSCRIPT_CHARS env var.
+  max_transcript_chars: 20000

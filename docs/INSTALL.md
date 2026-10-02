@@ -226,6 +226,18 @@ dashboard is auto-provisioned.
   docker compose build --no-cache hermes-agent
   docker compose up -d
   ```
+- **`summarize <url>` replies `[Task #N Failed] Note generation failed`**, and the logs show an
+  `exceeds the available context size` error from the LLM: the video's transcript is longer than
+  the loaded model's context window can handle alongside the note-generation prompt and response.
+  Two fixes, not mutually exclusive:
+  1. `NotesService` already truncates transcripts to `MAX_TRANSCRIPT_CHARS` (default `20000`) to
+     avoid this — if it still happens, your loaded model's context window is smaller than the
+     default assumes; lower `MAX_TRANSCRIPT_CHARS` in `.env`, or
+  2. increase the model's actual context window in LM Studio (**Developer tab → the loaded
+     model's settings → Context Length**) if your hardware/model supports more than 8K, then raise
+     `MAX_TRANSCRIPT_CHARS` to match. Either way, a truncated transcript produces a note covering
+     only the start of the video, not a silent failure — the generated `.md` file says so explicitly
+     when it happens.
 - **Can't reach Grafana from Windows at all:** confirm you're using the VM's host-only IP (step 10),
   not `127.0.0.1` — there's no NAT port-forward for Grafana by design (step 4). Also re-check
   `sudo firewall-cmd --list-rich-rules` on the VM includes the Grafana allow rule for your actual

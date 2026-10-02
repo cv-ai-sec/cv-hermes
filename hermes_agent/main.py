@@ -39,6 +39,7 @@ async def _run(settings: Settings) -> None:
         llm_model=settings.llm_model,
         llm_timeout=settings.llm_timeout,
         notes_dir=settings.notes_dir,
+        max_transcript_chars=settings.max_transcript_chars,
     )
 
     router = CommandRouter(

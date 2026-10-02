@@ -69,6 +69,16 @@ means a real model/container running inside `agent-net`, which is worth doing on
 need for it rather than upfront. The current behavior (a clear `[Task Failed]` message) makes that
 gap visible rather than hiding it behind a hang or a generic error.
 
+**Transcripts are truncated to fit the LLM's context window, not chunked/summarized in parts.**
+`NotesService` truncates to `MAX_TRANSCRIPT_CHARS` (default `20000`, configurable) before sending to
+the LLM — confirmed live: an untruncated transcript on an 8K-context local model fails with
+`exceeds the available context size`, a hard LLM-side error, not a soft limit. Truncating to the
+start of the video, rather than chunking the whole transcript and summarizing each piece, is an
+accepted simplification: chunked summarization is real additional complexity (merging partial
+summaries coherently) that isn't justified until there's an actual need for full-length coverage of
+long videos. A truncated note says so explicitly in its own content, rather than silently covering
+less than the user would assume.
+
 ## Trust boundaries
 
 - **Discord message → LLM:** every inbound message is treated as untrusted input to the model, not

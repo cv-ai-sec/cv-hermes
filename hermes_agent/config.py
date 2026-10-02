@@ -82,6 +82,11 @@ class Settings:
             "TASK_DB_PATH", tasks_cfg.get("db_path", "/app/data/tasks.db")
         )
         self.notes_dir = os.environ.get("NOTES_DIR", tasks_cfg.get("notes_dir", "/app/notes"))
+        self.max_transcript_chars = int(
+            os.environ.get(
+                "MAX_TRANSCRIPT_CHARS", tasks_cfg.get("max_transcript_chars", 20000)
+            )
+        )
 
     def validate(self) -> None:
         missing = [
