@@ -1,223 +1,60 @@
-# Hermes Agent — Discord Lab (Rocky Linux 9 VM)
+# cv-hermes
 
-A sandboxed, containerized Discord agent (Hermes) running inside a dedicated Rocky
-Linux 9 VM, with local observability via Grafana + Loki + Promtail (token usage,
-task latency, tool calls, error rates). Everything here is meant to be provisioned
-and run **inside the VM** — nothing in this repo installs anything on the physical
-host workstation.
+A sandboxed, containerized Discord agent (Hermes Agent: discord.py + an OpenAI-compatible LLM
+client) running inside a dedicated Rocky Linux 9 VM, with local observability via Grafana + Loki +
+Promtail — token usage, task latency, tool calls, and error rates, all tracked without any data
+leaving the VM except Hermes's own traffic to Discord and your chosen LLM API.
 
-## System specifications
+Runs inside a VirtualBox Rocky Linux 9 VM — see [docs/INSTALL.md](docs/INSTALL.md) for the full
+setup (any hypervisor in the spec table below works; that guide covers VirtualBox specifically).
 
-| Resource     | Minimum                          | Recommended                 |
-|--------------|-----------------------------------|------------------------------|
-| OS           | Rocky Linux 9 (x86_64, Minimal)   | same                         |
-| Hypervisor   | VMware Workstation / Proxmox / Hyper-V / VirtualBox / KVM | same |
-| vCPU         | 4                                 | 8                            |
-| RAM          | 8 GB                              | 16 GB+                       |
-| Disk         | 50 GB SSD/NVMe (thin provisioned) | same                         |
-| Network      | NAT or Bridged, SSH enabled, `firewalld` active | same |
+## Mission
+
+Run a real Discord-facing LLM agent with the blast radius of its one risky capability (file tool
+access) sandboxed to a single directory, and its network reach scoped to exactly what the project
+needs — while keeping every metric about what the agent is actually doing (cost, latency, errors)
+visible on a local dashboard, not buried in stdout.
+
+## Why this is safe to publish
+
+- **Secrets never touch a file.** `hermes_agent/config.py` reads `DISCORD_TOKEN`/`LLM_API_KEY` from
+  the environment only, never from the YAML config — `.env` is git-ignored, only `.env.example`
+  with placeholders is committed. See [docs/SECURITY.md](docs/SECURITY.md).
+- **Partially air-gapped, by documented exception.** Only the `hermes-agent` container can reach
+  the internet (Discord + the configured LLM API); Loki/Promtail/Grafana are firewalld-blocked from
+  all outbound traffic, since none of them need it. Full reasoning in
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- **Every container hardened:** `cap_drop: [ALL]`, `no-new-privileges`, read-only root filesystem,
+  non-root user, SELinux `:Z` volume labels — on every service, not just the agent.
+- **Sandboxed file tools.** The one tool category the LLM can call is path-contained to
+  `./workspace` on every invocation, not just at startup — see
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)'s Trust boundaries section.
+- **Pre-commit security checklist:** see [docs/SECURITY.md](docs/SECURITY.md) — followed before
+  every commit, not just the first one.
 
 ## Architecture
 
 ```
-+-----------------------------------------------------------------------------------+
-|                           PHYSICAL HOST WORKSTATION                               |
-|                                                                                     |
-|   +---------------------------------------------------------------------------+   |
-|   |                       ROCKY LINUX 9 VIRTUAL MACHINE                       |   |
-|   |                                                                             |   |
-|   |   firewalld: SSH allowed; 3000/tcp allowed from LOCAL_SUBNET only;        |   |
-|   |   obs-net subnet FORWARD-REJECTed to the internet (see "Network           |   |
-|   |   isolation" below)                                                        |   |
-|   |                                                                             |   |
-|   |   +---------------- agent-net (outbound internet OK) -------------------+ |   |
-|   |   |                                                                     | |   |
-|   |   |  [ Hermes Agent Container ]                                         | |   |
-|   |   |     - Outbound: Discord Gateway (wss) + LLM API                     | |   |
-|   |   |     - cap_drop: ALL, no-new-privileges, read_only root, non-root    | |   |
-|   |   |     - Isolated ./workspace volume (:Z) — sandboxed file tools only  | |   |
-|   |   |     - Writes structured JSON logs -> hermes-logs volume            | |   |
-|   |   |                                                                     | |   |
-|   |   +---------------------------------------------------------------------+ |   |
-|   |                                 |                                          |   |
-|   |                                 | (hermes-logs volume, not network)        |   |
-|   |                                 v                                          |   |
-|   |   +---------------- obs-net (NO internet access) ------------------------+ |   |
-|   |   |                                                                     | |   |
-|   |   |  [ Promtail ] --(HTTP push :3100)--> [ Loki ] <--(query)-- [Grafana]| |   |
-|   |   |                                                       (:3000, exposed| |   |
-|   |   |                                                        to LOCAL_SUBNET)|   |
-|   |   +---------------------------------------------------------------------+ |   |
-|   |                                                                             |   |
-|   +---------------------------------------------------------------------------+   |
-+-----------------------------------------------------------------------------------+
+Discord Gateway <-> Hermes Agent -> LLM API
+                        |
+                   JSON logs -> Promtail -> Loki <- Grafana
 ```
 
-### Network isolation — and why this is *not* the "air-gapped lab" pattern
+Full diagram, component table, and trust-boundary breakdown:
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-This workspace has a standing rule that fully air-gapped container labs block
-**all** egress at the host firewall. **Hermes Agent is intentionally not fully
-air-gapped** — its entire purpose is reaching the Discord Gateway and an LLM API
-over the internet, so blocking its egress would break the project. That's a
-deliberate, accepted exception to the air-gap default, not an oversight:
+## System specifications
 
-- `agent-net` (hermes-agent only): outbound internet is left open. This is the
-  one container in the stack that needs it.
-- `obs-net` (Loki, Promtail, Grafana): **is** treated as air-gapped, because
-  none of those three services have any legitimate reason to reach the
-  internet. `scripts/00_setup_rocky9_host.sh` adds a `firewalld --direct`
-  `FORWARD` reject rule for the `obs-net` subnet specifically — not relying on
-  Docker's `internal: true` (which breaks Grafana's published port 3000; see
-  this workspace's standing CLAUDE.md note on that failure mode).
-- Inbound to the VM: `firewalld` only allows SSH and 3000/tcp-from-`LOCAL_SUBNET`.
-  Every other container port stays unpublished/internal.
+| Resource   | Minimum                          | Recommended    |
+|------------|-----------------------------------|-----------------|
+| OS         | Rocky Linux 9 (x86_64, Minimal)   | same            |
+| Hypervisor | VMware Workstation / Proxmox / Hyper-V / VirtualBox / KVM | same |
+| vCPU       | 4                                 | 8               |
+| RAM        | 8 GB                              | 16 GB+          |
+| Disk       | 50 GB SSD/NVMe (thin provisioned) | same            |
+| Network    | NAT or Bridged, SSH enabled, `firewalld` active | same |
 
-If you later add a tool to Hermes that should never phone home at all, give it
-its own container on `obs-net` (or a third, equally locked-down network)
-rather than loosening `agent-net`.
-
-### Running alongside other labs on the same VM
-
-If this stack shares a VM with another project (e.g.
-[`ai-cybersecurity-devops-lab`](../ai-cybersecurity-devops-lab)), check both
-for overlap before bringing both up at once:
-
-| Setting | cv-hermes | ai-cybersecurity-devops-lab |
-|---|---|---|
-| Grafana / dashboard host port | `3000` (override with `GRAFANA_PORT` in `.env`) | open-webui on `3000` (override with `OPEN_WEBUI_PORT`) |
-| Loki host port | not published (internal-only) | `3100` (override with `LOKI_PORT`) |
-| Docker network subnet | `obs-net` = `172.28.9.0/24` | `lab_internal` = `172.28.1.0/24` |
-
-The subnets don't overlap, so no change needed there. The **Grafana port does
-conflict** with the other lab's default — set `GRAFANA_PORT` in `cv-hermes`'s
-`.env` to something else (e.g. `3001`) if both stacks run at the same time,
-and update `LOCAL_SUBNET`'s firewalld rule in
-`scripts/00_setup_rocky9_host.sh` to the port you actually chose.
-
-## Security hardening applied
-
-- **No secrets in files.** `.env` is git-ignored; only `.env.example` with
-  placeholder values is committed. `hermes_agent/config.py` reads tokens/API
-  keys from the environment only — never from the YAML config file — so a
-  leaked `hermes.yaml` can't leak a credential.
-- **Container hardening** on every service: `cap_drop: [ALL]`,
-  `security_opt: [no-new-privileges:true]`, `read_only: true` root filesystem,
-  non-root user (hermes-agent runs as a fixed non-root UID baked into its
-  Dockerfile), SELinux `:Z` volume labels.
-- **Sandboxed workspace.** `hermes_agent/tools.py` resolves every file path
-  the LLM asks to read/write and rejects anything that would escape
-  `./workspace` — the one place a prompt-injected response could try a path
-  traversal.
-- **Tool allowlist.** `config/hermes.example.yaml` only grants the agent a
-  short, explicit list of tools; it does not get an open-ended shell or
-  network tool.
-- **Low-cardinality log labels.** `config/promtail-config.yaml` only labels
-  on `level`/`event` — never on user/guild/message IDs — so Loki's index
-  doesn't blow up as usage grows.
-
-## Setup
-
-### 1. Provision the Rocky Linux 9 VM
-
-Create a VM matching the specs above in your hypervisor of choice, install
-Rocky Linux 9 (Minimal), enable SSH, and copy this project onto it (e.g.
-`git clone` once pushed, or `scp` the folder over).
-
-### 2. Run the host provisioning script
-
-```bash
-cd cv-hermes
-sudo bash scripts/00_setup_rocky9_host.sh
-```
-
-Before running, open the script and check/edit `LOCAL_SUBNET` (the subnet
-allowed to reach Grafana) and `OBS_NET_SUBNET` (must match `obs-net` in
-`docker-compose.yml`, default `172.28.9.0/24`) at the top.
-
-This installs Docker CE + the Compose plugin, `git`, configures `firewalld`
-(SSH + Grafana-from-LOCAL_SUBNET-only + the obs-net egress block), and sets
-the SELinux boolean containers need under enforcing mode.
-
-> Prefer Podman? `docker-compose.yml` works with `podman-compose up -d` too —
-> swap the install step in the script for `dnf install podman podman-compose`
-> and skip the `docker` group step.
-
-### 3. Configure secrets
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and fill in:
-- `DISCORD_TOKEN` / `DISCORD_APPLICATION_ID` from your bot's
-  [Discord Developer Portal](https://discord.com/developers/applications) page
-- `LLM_API_BASE` / `LLM_API_KEY` / `LLM_MODEL` for whatever OpenAI-compatible
-  endpoint you're using (a local model server, or a cloud provider)
-- `GRAFANA_ADMIN_PASSWORD` — change this from the placeholder before first boot
-- `GRAFANA_PORT` — only if `3000` is already in use on this VM by another
-  project (see "Running alongside other labs on the same VM" above); if you
-  change it here, also update `GRAFANA_PORT` at the top of
-  `scripts/00_setup_rocky9_host.sh` before running it
-
-`.env` is git-ignored. Never commit it.
-
-### 4. Launch the stack
-
-```bash
-docker compose up -d
-# or: podman-compose up -d
-```
-
-Check logs:
-
-```bash
-docker compose logs -f hermes-agent
-```
-
-### 5. Access Grafana
-
-From a machine on `LOCAL_SUBNET`, open `http://<VM_IP>:<GRAFANA_PORT>` (default
-`3000`), log in with
-`GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD` from your `.env`. The **Hermes
-Agent Overview** dashboard (`dashboards/hermes-overview.json`) is
-auto-provisioned and shows:
-- Errors per minute
-- Task latency (p50/p95)
-- Token usage (prompt + completion)
-- Tool calls by tool name
-- Live log stream
-
-### 6. Debugging the log pipeline
-
-If a panel looks empty, validate the raw log file matches the schema the
-pipeline expects:
-
-```bash
-docker compose exec hermes-agent python -m scripts.parse_metrics /var/log/hermes/hermes.jsonl
-```
-
-### 7. Exporting dashboard edits
-
-If you tweak a dashboard in the Grafana UI and want to save it back to this
-repo:
-
-```bash
-GRAFANA_API_TOKEN="glsa_xxx" bash scripts/export_grafana_dashboards.sh
-```
-
-(Create the token under Grafana > Administration > Service accounts — never
-use your admin password here.)
-
-## Pre-push checklist (do this before `git init`/commit/push)
-
-- [ ] `.env` is NOT staged (`git status` should not show it)
-- [ ] `grep -rniE "api_key|apikey|secret|password|token|sk-|AIza" .` over
-      staged files turns up only placeholders from `.env.example`
-- [ ] No real Discord token, LLM API key, or Grafana password appears in any
-      committed file, including this README
-- [ ] `workspace/` and `*.log` are excluded (check `.gitignore`)
-
-## Repository layout
+## Repository structure
 
 ```
 .
@@ -225,24 +62,69 @@ use your admin password here.)
 ├── .env.example
 ├── docker-compose.yml
 ├── README.md
-├── config/
-│   ├── hermes.example.yaml
-│   ├── loki-config.yaml
-│   ├── promtail-config.yaml
-│   ├── grafana-datasource.yaml
-│   └── grafana-dashboards-provisioning.yaml
-├── dashboards/
-│   └── hermes-overview.json
-├── hermes_agent/
-│   ├── Dockerfile
-│   ├── requirements.txt
-│   ├── main.py
-│   ├── config.py
-│   ├── metrics.py
-│   └── tools.py
-├── scripts/
-│   ├── 00_setup_rocky9_host.sh
-│   ├── parse_metrics.py
-│   └── export_grafana_dashboards.sh
-└── workspace/                # sandboxed, isolated workspace for Hermes (git-ignored contents)
+├── docs/             # ARCHITECTURE.md, INSTALL.md, SECURITY.md
+├── config/           # hermes.example.yaml, loki/promtail/grafana provisioning
+├── dashboards/       # hermes-overview.json — auto-provisioned Grafana dashboard
+├── hermes_agent/     # the bot itself: main.py, config.py, metrics.py, tools.py, Dockerfile
+├── scripts/          # 00_setup_rocky9_host.sh, parse_metrics.py, export_grafana_dashboards.sh
+└── workspace/        # sandboxed, isolated workspace for Hermes (git-ignored contents)
 ```
+
+## Getting started
+
+Full step-by-step setup (VirtualBox VM creation, host provisioning, firewalld, bringing up the
+stack): [docs/INSTALL.md](docs/INSTALL.md).
+
+Quick version, once the VM is provisioned (`sudo bash scripts/00_setup_rocky9_host.sh` has been
+run):
+
+```bash
+cp .env.example .env   # fill in DISCORD_TOKEN, LLM_API_BASE/KEY/MODEL, GRAFANA_ADMIN_PASSWORD
+docker compose up -d
+# or: podman-compose up -d
+docker compose logs -f hermes-agent
+```
+
+Then open `http://<VM_IP>:<GRAFANA_PORT>` (default `3000`) from a machine on `LOCAL_SUBNET` — the
+**Hermes Agent Overview** dashboard is auto-provisioned.
+
+## Running alongside other labs on the same VM
+
+If this stack shares a VM with another project (e.g.
+[`ai-cybersecurity-devops-lab`](../ai-cybersecurity-devops-lab)), check for port/subnet overlap
+before bringing both up at once:
+
+| Setting | cv-hermes | ai-cybersecurity-devops-lab |
+|---|---|---|
+| Dashboard host port | Grafana on `3000` (override: `GRAFANA_PORT`) | open-webui on `3000` (override: `OPEN_WEBUI_PORT`) |
+| Loki host port | not published (internal-only) | `3100` (override: `LOKI_PORT`) |
+| Docker network subnet | `obs-net` = `172.28.9.0/24` | `lab_internal` = `172.28.1.0/24` |
+
+Subnets don't overlap. The **Grafana port does conflict** with the other lab's open-webui default —
+set `GRAFANA_PORT` in `.env` to something else (e.g. `3001`) if running both at once, and update the
+matching variable in `scripts/00_setup_rocky9_host.sh` before running it.
+
+## Debugging the log pipeline
+
+If a Grafana panel looks empty, validate the raw log file matches the schema the pipeline expects:
+
+```bash
+docker compose exec hermes-agent python -m scripts.parse_metrics /var/log/hermes/hermes.jsonl
+```
+
+## Exporting dashboard edits
+
+If you tweak a dashboard in the Grafana UI and want to save it back to this repo:
+
+```bash
+GRAFANA_API_TOKEN="glsa_xxx" bash scripts/export_grafana_dashboards.sh
+```
+
+(Create the token under Grafana → Administration → Service accounts — never use your admin
+password here.)
+
+## Disclaimer
+
+Educational/personal lab project. Run your own Discord bot at your own risk with respect to
+Discord's Terms of Service and API rate limits; no production systems or third-party credentials
+other than your own bot token and LLM API key are involved anywhere in this repository.
