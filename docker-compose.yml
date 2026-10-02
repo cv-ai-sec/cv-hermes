@@ -18,6 +18,13 @@ services:
       - hermes-logs:/var/log/hermes:Z
     networks:
       - agent-net
+    extra_hosts:
+      # Points host.docker.internal at the Windows host's VirtualBox host-only adapter IP
+      # (not Docker's own host-gateway, which would resolve to the VM itself, not the
+      # Windows host one level up) — same pattern as ai-cybersecurity-devops-lab, so Hermes
+      # can reach LM Studio running on Windows. Irrelevant if you point LLM_API_BASE at a
+      # cloud provider instead.
+      - "host.docker.internal:${HOST_LM_STUDIO_IP:-192.168.56.1}"
     # Only this container needs outbound internet (Discord gateway + the configured LLM
     # API). loki/promtail/grafana below live on a separate network that firewalld blocks
     # from reaching the internet at all — see scripts/00_setup_rocky9_host.sh and README.md

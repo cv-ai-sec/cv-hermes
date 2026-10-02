@@ -15,13 +15,14 @@
 set -euo pipefail
 
 # --- Configuration you should check before running ---------------------------
-# The subnet allowed to reach Grafana. Default assumes a typical home/lab /24;
-# change this to match your actual LAN or VM host-only network.
-LOCAL_SUBNET="${LOCAL_SUBNET:-192.168.1.0/24}"
+# The subnet allowed to reach Grafana. Defaults to VirtualBox's default host-only
+# network (192.168.56.0/24) — the same adapter ai-cybersecurity-devops-lab uses — since
+# Grafana is meant to be reached via the VM's host-only IP, not a NAT port-forward (see
+# docs/INSTALL.md for why). Change this if your host-only network uses a different range,
+# or if you're reaching the VM over a bridged adapter/real LAN instead.
+LOCAL_SUBNET="${LOCAL_SUBNET:-192.168.56.0/24}"
 
-# Must match GRAFANA_PORT in .env (default 3000). Change this if 3000 is
-# already taken on this VM — e.g. ai-cybersecurity-devops-lab's open-webui
-# also defaults to host port 3000 — and set the same value in both places.
+# Must match GRAFANA_PORT in .env (default 3000).
 GRAFANA_PORT="${GRAFANA_PORT:-3000}"
 
 # Must match the `obs-net` subnet in docker-compose.yml. Loki/Promtail/Grafana

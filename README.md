@@ -85,24 +85,27 @@ docker compose up -d
 docker compose logs -f hermes-agent
 ```
 
-Then open `http://<VM_IP>:<GRAFANA_PORT>` (default `3000`) from a machine on `LOCAL_SUBNET` — the
-**Hermes Agent Overview** dashboard is auto-provisioned.
+Then find the VM's host-only IP (`ip addr show | grep 192.168.56`) and open
+`http://<that-ip>:<GRAFANA_PORT>` (default `3000`) from a machine on `LOCAL_SUBNET` — the **Hermes
+Agent Overview** dashboard is auto-provisioned.
 
-## Running alongside other labs on the same VM
+## Running alongside ai-cybersecurity-devops-lab
 
-If this stack shares a VM with another project (e.g.
-[`ai-cybersecurity-devops-lab`](../ai-cybersecurity-devops-lab)), check for port/subnet overlap
-before bringing both up at once:
+This project runs in its **own dedicated VM** (named `hermes agent` in VirtualBox), not the same VM
+as [`ai-cybersecurity-devops-lab`](../ai-cybersecurity-devops-lab) — but both VMs share this
+workspace's VirtualBox host-only network (`192.168.56.0/24`) and can both reach the same LM Studio
+instance on the Windows host. Settings that had to be kept distinct between the two VMs:
 
-| Setting | cv-hermes | ai-cybersecurity-devops-lab |
+| Setting | cv-hermes (`hermes agent` VM) | ai-cybersecurity-devops-lab (`ai_cybersecurity` VM) |
 |---|---|---|
-| Dashboard host port | Grafana on `3000` (override: `GRAFANA_PORT`) | open-webui on `3000` (override: `OPEN_WEBUI_PORT`) |
-| Loki host port | not published (internal-only) | `3100` (override: `LOKI_PORT`) |
+| NAT SSH forward | `127.0.0.1:2223` → guest `22` | `127.0.0.1:2222` → guest `22` |
+| Dashboard access | Grafana via host-only IP, `GRAFANA_PORT` (default `3000`) — no NAT forward | open-webui via NAT forward `127.0.0.1:3000` |
 | Docker network subnet | `obs-net` = `172.28.9.0/24` | `lab_internal` = `172.28.1.0/24` |
 
-Subnets don't overlap. The **Grafana port does conflict** with the other lab's open-webui default —
-set `GRAFANA_PORT` in `.env` to something else (e.g. `3001`) if running both at once, and update the
-matching variable in `scripts/00_setup_rocky9_host.sh` before running it.
+Since Grafana is reached via the VM's own host-only IP rather than a NAT-forwarded Windows port,
+there's no port collision with the other lab's dashboard even with both VMs running at once — see
+[docs/INSTALL.md](docs/INSTALL.md) for why NAT-forwarding Grafana is avoided in the first place
+(a confirmed VirtualBox NAT bug, same one documented in the other lab's install guide).
 
 ## Debugging the log pipeline
 

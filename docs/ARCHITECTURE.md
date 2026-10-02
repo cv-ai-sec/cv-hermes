@@ -2,22 +2,27 @@
 
 ```mermaid
 graph LR
-  A[Discord Gateway] <-->|wss| B[Hermes Agent]
-  B -->|chat completion| C[LLM API]
+  A[Discord Gateway] <-->|wss, via NAT adapter| B[Hermes Agent]
+  B -->|chat completion| C[LM Studio on Windows host]
   B -->|JSON log lines, shared volume| D[Promtail]
   D -->|HTTP push :3100| E[Loki]
   F[Grafana] -->|query| E
-  U[User's browser] -->|LOCAL_SUBNET only| F
+  U[User's browser] -->|host-only IP, LOCAL_SUBNET only| F
 ```
+
+`C` defaults to LM Studio running on the Windows host, reached over VirtualBox's host-only adapter
+(`host.docker.internal` → `HOST_LM_STUDIO_IP`, same pattern as `ai-cybersecurity-devops-lab`) — swap
+`LLM_API_BASE`/`LLM_API_KEY` in `.env` for a cloud provider instead if you'd rather not run a local
+model.
 
 ## Components
 
 | Component | Role | Network exposure |
 |---|---|---|
-| Hermes Agent (`hermes_agent/`) | discord.py bot + OpenAI-compatible LLM client; sandboxed file tools | `agent-net` — the one container allowed outbound internet, to the Discord Gateway and the configured LLM API |
+| Hermes Agent (`hermes_agent/`) | discord.py bot + OpenAI-compatible LLM client; sandboxed file tools | `agent-net` — the one container allowed outbound internet, to the Discord Gateway (NAT adapter) and LM Studio on the Windows host (host-only adapter) |
 | Loki (`config/loki-config.yaml`) | Log storage | `obs-net` only — no internet, see Trust boundaries |
 | Promtail (`config/promtail-config.yaml`) | Tails the shared `hermes-logs` volume, ships lines to Loki | `obs-net` only — no internet |
-| Grafana (`dashboards/hermes-overview.json`) | Dashboards over Loki: errors/min, task latency p50/p95, token usage, tool calls, live log stream | `obs-net` + one published host port (`GRAFANA_PORT`), firewalld-restricted to `LOCAL_SUBNET` |
+| Grafana (`dashboards/hermes-overview.json`) | Dashboards over Loki: errors/min, task latency p50/p95, token usage, tool calls, live log stream | `obs-net` + one published port (`GRAFANA_PORT`), reached via the VM's host-only IP and firewalld-restricted to `LOCAL_SUBNET` — no NAT port-forward (see `docs/INSTALL.md` for why) |
 | Sandboxed workspace (`hermes_agent/tools.py`, `./workspace`) | File read/write tools the LLM can call | No network role — a filesystem boundary, not a network one |
 
 ## Trust boundaries

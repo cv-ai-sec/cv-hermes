@@ -1,10 +1,12 @@
 # Installation Guide (VirtualBox + Rocky Linux 9)
 
 This guide runs the entire cv-hermes stack **inside a dedicated VirtualBox VM** running Rocky Linux
-9. It assumes VirtualBox since that's what this workspace's other lab
-([`ai-cybersecurity-devops-lab`](../ai-cybersecurity-devops-lab)) already uses — any of the
-hypervisors listed in the main [README.md](../README.md)'s spec table work too, but the
-network-adapter and port-forwarding steps below are VirtualBox-specific.
+9, using the same NAT + Host-only adapter pattern as this workspace's other lab
+([`ai-cybersecurity-devops-lab`](../ai-cybersecurity-devops-lab)) — one adapter for internet access
+(Discord, package installs, optionally a cloud LLM API), one private host-only link to reach LM
+Studio running on the Windows host. Any hypervisor in the main [README.md](../README.md)'s spec
+table works in principle, but the network-adapter and port-forwarding steps below are
+VirtualBox-specific.
 
 ## Why Rocky Linux 9
 
@@ -16,7 +18,20 @@ target first.
 
 Download from virtualbox.org and install normally. The Extension Pack isn't required for this lab.
 
-## 2. Create the Rocky 9 VM
+## 2. Create (or reuse) the host-only network
+
+If `ai-cybersecurity-devops-lab` is already set up on this machine, its host-only network already
+exists — reuse it rather than creating a second one. Otherwise:
+
+1. **File → Tools → Network Manager** (or **Host Network Manager** on older VirtualBox versions).
+2. Create a new **Host-only Network** if none exists (default name `vboxnet0`).
+3. Note its IPv4 address — default `192.168.56.1`. This is the Windows host's address as seen from
+   the VM, and the default this project's `.env.example`/`HOST_LM_STUDIO_IP` and
+   `scripts/00_setup_rocky9_host.sh`'s `LOCAL_SUBNET` assume. If yours differs, use that value
+   everywhere `192.168.56.1`/`192.168.56.0/24` appears below.
+4. Leave its DHCP server enabled so the VM gets an IP automatically.
+
+## 3. Create the Rocky 9 VM
 
 Sizing per the main README's spec table:
 
@@ -25,65 +40,57 @@ Sizing per the main README's spec table:
 - **CPU:** 4 cores minimum, 8 recommended
 - **Disk:** 50 GB, dynamically allocated (VDI)
 
-**Network adapter (Settings → Network → Adapter 1): Bridged Adapter**, attached to your physical
-NIC. This gives the VM its own LAN-reachable IP directly — simplest option, and it avoids a
-confirmed VirtualBox NAT engine ("slirp") bug where certain HTTP responses through a NAT
-port-forward hang indefinitely (hit while building `ai-cybersecurity-devops-lab`'s dashboard; see
-that project's `docs/INSTALL.md` step 4 for the full story). Set **Adapter Type** to
-**Paravirtualized Network (virtio-net)** for better performance — Rocky 9 has virtio drivers built
-in.
+**Network adapters (Settings → Network):**
+- **Adapter 1: NAT** — internet access for package installs (`dnf`, `docker pull`) and for
+  hermes-agent's own outbound traffic to Discord (and a cloud LLM API, if you use one instead of a
+  local model).
+- **Adapter 2: Host-only Adapter** → select the network from step 2 — this is how the VM reaches LM
+  Studio on Windows.
 
-> **Using NAT instead of Bridged?** It works, but you'll need an explicit port-forward rule for
-> `GRAFANA_PORT` (**Settings → Network → Adapter 1 → Advanced → Port Forwarding**), and you may hit
-> the slirp bug above on that forwarded port. Bridged avoids both problems.
-
-> **Using a local LLM server on the Windows host (e.g. LM Studio, Ollama) instead of a cloud API?**
-> Add a second adapter as a **Host-only Adapter** (create one via **File → Tools → Network
-> Manager** if none exists) — this is the same pattern `ai-cybersecurity-devops-lab` uses to reach
-> LM Studio from its VM; see that project's `docs/INSTALL.md` steps 2 and 9 for the full setup
-> (including the Windows Firewall rule to scope LM Studio's reachability to just this VM). Point
-> `LLM_API_BASE` in `.env` at the host-only adapter's host-side IP (e.g.
-> `http://192.168.56.1:1234/v1`).
+Set both adapters' **Adapter Type** to **Paravirtualized Network (virtio-net)** for better
+performance — Rocky 9 has virtio drivers built in.
 
 Attach the Rocky 9 minimal ISO (**Settings → Storage**), boot with **Normal Start** so you get a
 console to watch the installer, and run through it — a minimal install (no desktop environment) is
 enough. The installer's mouse pointer is inaccurate until Guest Additions are installed; navigate
 with the keyboard (`Tab`/`Space`/`Enter`/arrows) instead.
 
-## 3. Find the VM's IP and confirm SSH
+## 4. Set up SSH port forwarding (Windows → VM)
 
-Once booted:
+**Settings → Network → Adapter 1 (NAT) → Advanced → Port Forwarding:**
 
-```bash
-ip addr show   # note the IP on your bridged interface
-sudo systemctl status sshd   # should be active by default on a minimal install
-```
+| Name | Protocol | Host IP | Host Port | Guest IP | Guest Port |
+|---|---|---|---|---|---|
+| ssh | TCP | 127.0.0.1 | 2223 | (blank) | 22 |
 
-From Windows: `ssh <user>@<vm-ip>`.
+Host port **2223**, not **2222** — `ai-cybersecurity-devops-lab`'s VM already forwards `2222` to its
+own SSH; using a different port here lets both VMs run at the same time without a conflict
+(`ssh -p 2223 <user>@127.0.0.1` reaches this one, `ssh -p 2222 <user>@127.0.0.1` reaches the other).
 
-## 4. Get the project into the VM
+**No Grafana port-forward rule** — deliberately. `ai-cybersecurity-devops-lab`'s install guide
+documents a confirmed VirtualBox NAT engine ("slirp") bug where certain HTTP responses through a
+NAT port-forward hang indefinitely; that project works around it by reaching its dashboard via the
+VM's host-only IP instead of a NAT-forwarded port, and this project uses the same approach for
+Grafana — see step 9.
+
+## 5. Inside the VM: install Docker Engine and get the project
 
 ```bash
 git clone https://github.com/cv-ai-sec/cv-hermes.git
 cd cv-hermes
 ```
 
-If you haven't pushed yet, use `scp` from Windows instead:
+If you haven't pushed yet, use `scp` from Windows over the SSH port-forward instead:
 ```powershell
-scp -r "D:\Ai projects\Projects\cv-hermes" <user>@<vm-ip>:~/
+scp -P 2223 -r "D:\Ai projects\Projects\cv-hermes" <user>@127.0.0.1:~/
 ```
 
-## 5. Run the host provisioning script
+## 6. Run the host provisioning script
 
-Open `scripts/00_setup_rocky9_host.sh` first and check the two variables at the top:
-
-- `LOCAL_SUBNET` — the subnet allowed to reach Grafana. With a bridged adapter, this is your real
-  LAN subnet (e.g. `192.168.1.0/24`); check with `ip addr show` on the VM or your router's admin
-  page.
-- `GRAFANA_PORT` — only change this if `3000` conflicts with another project on the same VM (see
-  the main README's "Running alongside other labs on the same VM" section).
-
-Then run it:
+Open `scripts/00_setup_rocky9_host.sh` first and check the variables at the top — `LOCAL_SUBNET`
+defaults to `192.168.56.0/24` (the host-only subnet from step 2) and `GRAFANA_PORT` defaults to
+`3000`; only change these if your host-only network uses a different range, or `3000` is unavailable
+for some other reason.
 
 ```bash
 sudo bash scripts/00_setup_rocky9_host.sh
@@ -100,28 +107,50 @@ newgrp docker
 docker run --rm hello-world
 ```
 
-## 6. Configure environment
+## 7. Install LM Studio on the Windows host (not inside the VM)
+
+Skip this step if you're pointing `LLM_API_BASE` at a cloud provider instead.
+
+1. Download and install LM Studio normally on Windows.
+2. Download an open-weight model (`.env.example` defaults to `qwen2.5-7b-instruct` — adjust
+   `LLM_MODEL` in `.env` to match whatever model ID LM Studio reports).
+3. Go to LM Studio's **Developer** tab and start the local server.
+4. Enable **"Serve on Local Network"** so it binds to `0.0.0.0:1234` instead of `127.0.0.1` (the VM
+   can't reach a literal loopback bind on the Windows host).
+5. **Lock this down in Windows Firewall** immediately, so it's reachable only from the VM's
+   host-only subnet:
+   ```powershell
+   New-NetFirewallRule -DisplayName "LM Studio - VM only" -Direction Inbound -Protocol TCP `
+     -LocalPort 1234 -RemoteAddress 192.168.56.0/24 -Action Allow
+   New-NetFirewallRule -DisplayName "LM Studio - block other inbound" -Direction Inbound -Protocol TCP `
+     -LocalPort 1234 -RemoteAddress Any -Action Block
+   ```
+   (Run as Administrator. Adjust `192.168.56.0/24` if your host-only network uses a different
+   range. Skip this if you already added it for `ai-cybersecurity-devops-lab` — one rule covers
+   both, since both VMs sit on the same host-only subnet.)
+
+## 8. Configure environment and bring up the stack
 
 ```bash
 cp .env.example .env
 ```
 
 Edit `.env` and fill in `DISCORD_TOKEN`/`DISCORD_APPLICATION_ID` (from the
-[Discord Developer Portal](https://discord.com/developers/applications)), `LLM_API_BASE`/
-`LLM_API_KEY`/`LLM_MODEL`, and change `GRAFANA_ADMIN_PASSWORD` from its placeholder.
-
-## 7. Bring up the stack
+[Discord Developer Portal](https://discord.com/developers/applications)), confirm
+`HOST_LM_STUDIO_IP` matches your host-only adapter's IP (check with
+`ip addr show | grep 192.168.56` inside the VM), and change `GRAFANA_ADMIN_PASSWORD` from its
+placeholder.
 
 `docker-compose.yml` lives at the repo root here (unlike `ai-cybersecurity-devops-lab`, which keeps
 it in a `docker/` subfolder) — so a plain `docker compose` from the repo root picks up both the
-compose file and `.env` automatically, no `-f`/`--env-file` flags needed:
+compose file and `.env` automatically:
 
 ```bash
 docker compose up -d
 docker compose ps
 ```
 
-## 8. Verify network isolation
+## 9. Verify network isolation
 
 Confirm `obs-net` (Loki/Promtail/Grafana) genuinely cannot reach the internet — this should time
 out, not succeed:
@@ -130,17 +159,24 @@ out, not succeed:
 docker compose exec grafana curl -m 3 -sS https://8.8.8.8
 ```
 
-Confirm hermes-agent *can* reach the internet (needed for Discord/LLM):
+Confirm hermes-agent can reach LM Studio on the Windows host (skip if using a cloud LLM API):
 
 ```bash
-docker compose exec hermes-agent python -c "import urllib.request; print(urllib.request.urlopen('https://discord.com', timeout=5).status)"
+docker compose exec hermes-agent curl -m 3 -sS http://host.docker.internal:1234/v1/models
 ```
 
-## 9. Access Grafana
+## 10. Access Grafana
 
-From a machine on `LOCAL_SUBNET`: `http://<VM_IP>:<GRAFANA_PORT>` (default `3000`). Log in with
-`GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD` from `.env`. The **Hermes Agent Overview** dashboard
-is auto-provisioned.
+Find the VM's host-only IP:
+
+```bash
+ip addr show | grep 192.168.56
+```
+
+Then from Windows, visit `http://<that-ip>:<GRAFANA_PORT>` (e.g. `http://192.168.56.102:3000` —
+yours may differ; DHCP-assigned host-only IPs are usually stable across reboots but not guaranteed).
+Log in with `GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD` from `.env`. The **Hermes Agent Overview**
+dashboard is auto-provisioned.
 
 ## Troubleshooting
 
@@ -149,6 +185,11 @@ is auto-provisioned.
   (or log out/back in over SSH) rather than re-running the script.
 - **`git clone`/`scp` fails with "Permission denied" creating the work tree dir:** you're likely in
   a root-owned directory. `cd ~` first.
+- **`hermes-agent` can't reach LM Studio (`curl` in step 9 fails/times out):** confirm LM Studio's
+  server is running with "Serve on Local Network" enabled (step 7.4), the Windows Firewall rule
+  allows the host-only subnet (step 7.5), and `HOST_LM_STUDIO_IP` in `.env` matches the host-only
+  adapter's actual IP — then recreate the container so the `extra_hosts` mapping picks up the
+  change: `docker compose up -d --force-recreate hermes-agent`.
 - **Grafana shows "no data" on every panel:** check Promtail is actually shipping lines —
   `docker compose logs promtail` — and that `hermes-agent` has written anything to
   `/var/log/hermes/hermes.jsonl` yet (`docker compose exec hermes-agent cat /var/log/hermes/hermes.jsonl`).
@@ -158,14 +199,13 @@ is auto-provisioned.
 - **Bot never responds in Discord, no errors in logs:** confirm the bot has "Message Content
   Intent" enabled in the Discord Developer Portal (**Bot → Privileged Gateway Intents**) — without
   it, `discord.py` silently receives messages with empty `content`.
-- **Browser can't reach `http://<VM_IP>:<GRAFANA_PORT>` from `LOCAL_SUBNET`, but `curl` from inside
-  the VM works:** `firewalld`'s rich rule may not have applied — re-check
-  `sudo firewall-cmd --list-rich-rules` on the VM includes the Grafana allow rule, and that your
-  browser's actual source IP is really inside `LOCAL_SUBNET` (re-run the setup script after fixing
-  `LOCAL_SUBNET` if it was wrong the first time — it's safe to re-run).
-- **VM has no internet access at all (package installs/`docker pull` fail):** confirm the bridged
-  adapter picked up a DHCP lease from your router (`ip addr show`) — a bridged adapter depends on
-  your physical network's DHCP server, unlike NAT's built-in one.
+- **Can't reach Grafana from Windows at all:** confirm you're using the VM's host-only IP (step 10),
+  not `127.0.0.1` — there's no NAT port-forward for Grafana by design (step 4). Also re-check
+  `sudo firewall-cmd --list-rich-rules` on the VM includes the Grafana allow rule for your actual
+  `LOCAL_SUBNET`.
+- **SSH (`ssh -p 2223 ...`) fails with `kex_exchange_identification: read: Connection reset`:** the
+  TCP connection succeeded but nothing spoke SSH back — check the port-forward rule's guest port is
+  `22` (not `2223`), confirm `sudo systemctl status sshd` is active inside the VM.
 - **SELinux denials in `/var/log/audit/audit.log` when a container tries to read a mounted
   config/volume:** confirm the volume's compose entry still has its `:Z` suffix (e.g.
   `./workspace:/workspace:Z`) — removing it is the most common way this regresses.
