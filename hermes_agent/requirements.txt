@@ -16,5 +16,9 @@ yt-dlp==2024.10.7
 # still installed unconditionally since Docker images can't conditionally install deps
 # at runtime. Verify against whatever version actually installs (`pip show revolt.py`);
 # see hermes_agent/adapters/revolt_adapter.py's module docstring for why.
+# No explicit aiohttp pin here on purpose: revolt.py==0.1.6 hard-pins aiohttp==3.7.4.post0
+# exactly, and discord.py's own requirement (aiohttp<4,>=3.7.4) is loose enough to accept
+# that version too — pinning aiohttp ourselves to anything newer makes pip's resolver fail
+# with a hard conflict (confirmed: pip install errors "ResolutionImpossible" against
+# aiohttp==3.10.10). Let revolt.py's pin win.
 revolt.py==0.1.6
-aiohttp==3.10.10
