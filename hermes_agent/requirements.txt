@@ -7,9 +7,13 @@ httpx==0.27.2
 PyYAML==6.0.2
 
 # --- Task automation pipeline (summarize/task commands) ---
-# yt-dlp breaks against YouTube's changes fairly often — if transcript fetching starts
-# failing, bumping this to the latest release is usually the first thing to try.
-yt-dlp==2024.10.7
+# Deliberately NOT pinned to an exact version. yt-dlp needs to keep up with YouTube's
+# extraction internals changing, and an old pinned version reliably breaks with errors
+# like "Requested format is not available" that have nothing to do with this project's
+# own code (confirmed live: 2024.10.7 failed this way after ~2 years unpinned-in-practice).
+# Letting `docker compose build --no-cache` always fetch latest is more reliable here than
+# reproducibility — if transcript fetching breaks again, `--no-cache` rebuild is step one.
+yt-dlp
 
 # --- Revolt chat platform: deliberately NOT installed (accepted gap, not an oversight) ---
 # revolt.py==0.1.6 (the only Python Revolt library readily available at the time this was

@@ -212,10 +212,20 @@ dashboard is auto-provisioned.
   non-root UID (`10001`). If `docker compose up` created them as root on first run, fix ownership:
   `sudo chown -R 10001:10001 notes data workspace` (the same issue can affect `./workspace` for the
   same reason).
-- **`summarize <url>` always replies `[Task Failed] No 'en' transcript/captions available`:** this is
+- **`summarize <url>` replies `[Task Failed] No 'en' transcript/captions available`:** this is
   expected for audio-only videos or ones without English captions — Whisper-based transcription for
   that case isn't implemented yet (see `docs/ARCHITECTURE.md`). Try a video with existing captions to
   confirm the pipeline itself works.
+- **`summarize <url>` replies the generic `[Task Failed] Could not fetch transcript`** (not the
+  specific "no transcript" message above), and `docker compose logs hermes-agent` shows a `yt-dlp`
+  error like `Requested format is not available`: this is `yt-dlp` itself being out of date against
+  YouTube's current extraction internals, unrelated to this project's own code — confirmed live, not
+  hypothetical (`requirements.txt` deliberately leaves `yt-dlp` unpinned for exactly this reason).
+  Force a fresh install of the latest release:
+  ```bash
+  docker compose build --no-cache hermes-agent
+  docker compose up -d
+  ```
 - **Can't reach Grafana from Windows at all:** confirm you're using the VM's host-only IP (step 10),
   not `127.0.0.1` — there's no NAT port-forward for Grafana by design (step 4). Also re-check
   `sudo firewall-cmd --list-rich-rules` on the VM includes the Grafana allow rule for your actual
