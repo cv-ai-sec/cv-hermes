@@ -1,3 +1,7 @@
 discord.py==2.4.0
 openai==1.51.0
+# openai 1.51.0's internal httpx client still passes a `proxies` kwarg that httpx 0.28+
+# removed (renamed to `proxy`), causing a crash-loop TypeError at startup. Pin httpx to
+# the last 0.27.x release until openai is bumped past ~1.55.3, which dropped that kwarg.
+httpx==0.27.2
 PyYAML==6.0.2
