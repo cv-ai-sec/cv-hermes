@@ -29,6 +29,56 @@ not guaranteed — re-check here if anything below stops resolving.
 | Generated notes | `./notes/` on the VM (bind-mounted from the repo root) | One `.md` file per completed `summarize` task. |
 | Task DB | `./data/tasks.db` on the VM (SQLite) | Inspect with `sqlite3 data/tasks.db "SELECT * FROM tasks;"` if `sqlite3` is installed on the VM, or copy the file off and open it locally. |
 
+## Graceful startup
+
+1. Start the VM (from Windows):
+   ```powershell
+   & "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" startvm "hermes agent" --type headless
+   ```
+2. Give it a few seconds to boot, then confirm SSH is up: `ssh -p 2223 <user>@127.0.0.1`
+3. Bring up the stack:
+   ```bash
+   docker compose up -d
+   ```
+4. Verify everything actually started clean, not crash-looping:
+   ```bash
+   docker compose ps
+   ```
+   Every service should show `Up`/`running` — not `Restarting`. If `hermes-agent` is restarting,
+   check `docker compose logs hermes-agent --tail 30` before assuming the rest of the stack is fine.
+
+## Graceful shutdown
+
+**Stop the containers first, don't just kill the VM:**
+```bash
+docker compose down
+```
+This sends `SIGTERM` and waits for each container to exit cleanly, rather than a hard kill — this
+matters here specifically because `hermes-agent` holds an open SQLite connection
+(`./data/tasks.db`) and Grafana/Loki have their own on-disk state; an abrupt stop risks leaving
+either in a corrupted or inconsistent state. `docker compose down` does **not** delete volumes or
+your bind-mounted `./notes`/`./data`/`./workspace` — your data is still there after this.
+
+**Then shut down the VM's OS itself cleanly, over SSH — not a VirtualBox power-off:**
+```bash
+sudo shutdown -h now
+```
+
+**Avoid this for routine shutdowns:**
+```powershell
+# Only as a last resort for a genuinely hung VM — equivalent to pulling the power cord
+& "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" controlvm "hermes agent" poweroff
+```
+A hard `poweroff` skips the OS's own unmount/flush sequence entirely — the same class of risk
+`docker compose down` avoids one layer up, just at the filesystem level instead of the container
+level.
+
+**Confirm it's actually off** (from Windows, a few seconds after step above):
+```powershell
+& "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" list runningvms
+```
+`hermes agent` should no longer appear in the list.
+
 ## Bot commands (Discord and/or Revolt, same syntax either way)
 
 | Command | What happens |

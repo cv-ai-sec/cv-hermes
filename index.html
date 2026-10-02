@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cv-hermes — Sandboxed Discord/Revolt Agent</title>
+<meta name="description" content="A sandboxed, containerized Discord/Revolt agent with full local observability — concept overview.">
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg-panel: #161b22;
+    --bg-panel-2: #1c2128;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --accent: #58a6ff;
+    --accent-2: #3fb950;
+    --accent-3: #d29922;
+    --accent-4: #f85149;
+    --discord: #5865F2;
+    --revolt: #FF4655;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+  }
+  a { color: var(--accent); }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 0 20px; }
+
+  header.hero {
+    padding: 64px 0 40px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+  }
+  header.hero h1 {
+    font-size: 2.4rem;
+    margin: 0 0 12px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  header.hero p.tagline {
+    font-size: 1.1rem;
+    color: var(--text-dim);
+    max-width: 680px;
+    margin: 0 auto 24px;
+  }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 24px; }
+  .badge {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 14px;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+  }
+  .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block;
+    padding: 10px 20px;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+  .btn-primary { background: var(--accent); color: #04121f; }
+  .btn-secondary { background: var(--bg-panel); color: var(--text); border: 1px solid var(--border); }
+
+  section { padding: 56px 0; border-bottom: 1px solid var(--border); }
+  section:last-of-type { border-bottom: none; }
+  section h2 {
+    font-size: 1.5rem;
+    margin: 0 0 8px;
+  }
+  section p.lede { color: var(--text-dim); margin: 0 0 32px; max-width: 760px; }
+
+  /* Architecture diagram */
+  .arch {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .arch-row { display: flex; gap: 16px; flex-wrap: wrap; align-items: stretch; }
+  .arch-box {
+    flex: 1 1 220px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    position: relative;
+  }
+  .arch-box.agent-net { border-color: var(--accent-2); }
+  .arch-box.obs-net { border-color: var(--accent-3); }
+  .arch-box h4 { margin: 0 0 6px; font-size: 0.95rem; }
+  .arch-box p { margin: 0; font-size: 0.8rem; color: var(--text-dim); }
+  .net-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 2px 8px;
+    border-radius: 4px;
+    display: inline-block;
+    margin-bottom: 8px;
+  }
+  .net-label.agent-net { background: rgba(63,185,80,0.15); color: var(--accent-2); }
+  .net-label.obs-net { background: rgba(210,153,34,0.15); color: var(--accent-3); }
+  .arrow { text-align: center; color: var(--text-dim); font-size: 1.2rem; }
+
+  /* Mock Grafana */
+  .grafana-mock {
+    background: #111217;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .grafana-topbar {
+    background: #181b1f;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+  }
+  .grafana-topbar .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .grafana-topbar .dot.r { background: #ff5f56; }
+  .grafana-topbar .dot.y { background: #ffbd2e; }
+  .grafana-topbar .dot.g { background: #27c93f; }
+  .grafana-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1px;
+    background: var(--border);
+  }
+  .panel {
+    background: #111217;
+    padding: 16px;
+  }
+  .panel h5 { margin: 0 0 10px; font-size: 0.75rem; color: var(--text-dim); font-weight: 500; text-transform: uppercase; letter-spacing: 0.03em; }
+  .stat-value { font-size: 1.8rem; font-weight: 700; }
+  .stat-value.good { color: var(--accent-2); }
+  .stat-value.warn { color: var(--accent-3); }
+  .sparkline { margin-top: 10px; height: 36px; }
+  .bars { display: flex; align-items: flex-end; gap: 3px; height: 50px; margin-top: 8px; }
+  .bars div { flex: 1; background: var(--accent); border-radius: 2px 2px 0 0; opacity: 0.85; }
+  .logline { font-family: "SF Mono", Consolas, monospace; font-size: 0.72rem; color: var(--text-dim); padding: 2px 0; border-bottom: 1px dashed rgba(255,255,255,0.05); }
+  .logline .lvl-info { color: var(--accent); }
+  .logline .lvl-err { color: var(--accent-4); }
+
+  /* Mock chat */
+  .chat-mocks { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 760px) { .chat-mocks { grid-template-columns: 1fr; } }
+  .chat-mock {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .chat-mock-header {
+    padding: 10px 14px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #fff;
+  }
+  .chat-mock-header.discord { background: var(--discord); }
+  .chat-mock-header.revolt { background: var(--revolt); }
+  .chat-body { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 85%; padding: 8px 12px; border-radius: 10px; font-size: 0.85rem; }
+  .msg.user { align-self: flex-end; background: var(--bg-panel-2); }
+  .msg.bot { align-self: flex-start; background: rgba(88,166,255,0.1); border: 1px solid rgba(88,166,255,0.25); }
+  .msg .meta { font-size: 0.7rem; color: var(--text-dim); margin-bottom: 3px; }
+
+  /* Feature grid */
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+  }
+  .feature {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+  }
+  .feature h4 { margin: 0 0 8px; font-size: 0.95rem; }
+  .feature p { margin: 0; font-size: 0.85rem; color: var(--text-dim); }
+
+  footer {
+    padding: 32px 0 48px;
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+  }
+
+  code.inline {
+    background: var(--bg-panel-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 0.85em;
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>cv-hermes</h1>
+    <p class="tagline">
+      A sandboxed, containerized Discord &amp; Revolt agent with full local observability —
+      running entirely inside an isolated VM, with network reach scoped to exactly what it needs.
+    </p>
+    <div class="badges">
+      <span class="badge">Python</span>
+      <span class="badge">discord.py</span>
+      <span class="badge">revolt.py</span>
+      <span class="badge">OpenAI-compatible LLM</span>
+      <span class="badge">Docker Compose</span>
+      <span class="badge">Grafana</span>
+      <span class="badge">Loki</span>
+      <span class="badge">Promtail</span>
+      <span class="badge">Rocky Linux 9</span>
+      <span class="badge">VirtualBox</span>
+    </div>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/cv-ai-sec/cv-hermes">View on GitHub</a>
+      <a class="btn btn-secondary" href="#architecture">See how it works ↓</a>
+    </div>
+  </div>
+</header>
+
+<section id="architecture">
+  <div class="wrap">
+    <h2>Architecture</h2>
+    <p class="lede">
+      Two Docker networks, split by what actually needs internet access. The agent talks to
+      Discord/Revolt, an LLM, and YouTube (for transcript fetching) — the observability stack
+      talks to nothing outside itself.
+    </p>
+    <div class="arch">
+      <div class="arch-row">
+        <div class="arch-box">
+          <h4>Discord / Revolt Gateway</h4>
+          <p>Inbound chat messages and commands</p>
+        </div>
+        <div class="arch-box">
+          <h4>LM Studio (local LLM)</h4>
+          <p>Reached over a private host-only link — no cloud API required</p>
+        </div>
+        <div class="arch-box">
+          <h4>YouTube (via yt-dlp)</h4>
+          <p>Transcript/caption fetch only — never downloads audio or video</p>
+        </div>
+      </div>
+      <div class="arrow">↓ ↕ ↓</div>
+      <div class="arch-row">
+        <div class="arch-box agent-net">
+          <span class="net-label agent-net">agent-net</span>
+          <h4>Hermes Agent</h4>
+          <p>The only container with outbound internet. Sandboxed file tools, task DB, note generator.</p>
+        </div>
+      </div>
+      <div class="arrow">↓ JSON logs</div>
+      <div class="arch-row">
+        <div class="arch-box obs-net">
+          <span class="net-label obs-net">obs-net — no internet, firewall-blocked</span>
+          <h4>Promtail → Loki → Grafana</h4>
+          <p>Structured logs shipped, stored, and visualized. Dashboard reachable only from the local subnet.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="observability">
+  <div class="wrap">
+    <h2>Observability — concept preview</h2>
+    <p class="lede">
+      Illustrative mock-up of the auto-provisioned Grafana dashboard — not live data.
+      <a href="https://github.com/cv-ai-sec/cv-hermes/blob/main/dashboards/hermes-overview.json">See the real panel definitions →</a>
+    </p>
+    <div class="grafana-mock">
+      <div class="grafana-topbar">
+        <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+        &nbsp; Hermes Agent Overview &nbsp;•&nbsp; auto-refresh 30s
+      </div>
+      <div class="grafana-grid">
+        <div class="panel">
+          <h5>Errors / min</h5>
+          <div class="stat-value good">0.2</div>
+          <div class="bars">
+            <div style="height:10%"></div><div style="height:15%"></div><div style="height:8%"></div>
+            <div style="height:30%"></div><div style="height:12%"></div><div style="height:5%"></div>
+            <div style="height:18%"></div><div style="height:9%"></div>
+          </div>
+        </div>
+        <div class="panel">
+          <h5>Task latency (p50 / p95, ms)</h5>
+          <div class="stat-value">840 <span style="font-size:1rem;color:var(--text-dim)">/ 2,140</span></div>
+          <div class="bars">
+            <div style="height:40%;background:var(--accent-2)"></div><div style="height:55%;background:var(--accent-2)"></div>
+            <div style="height:45%;background:var(--accent-2)"></div><div style="height:70%;background:var(--accent-2)"></div>
+            <div style="height:50%;background:var(--accent-2)"></div><div style="height:65%;background:var(--accent-2)"></div>
+          </div>
+        </div>
+        <div class="panel">
+          <h5>Token usage (prompt + completion)</h5>
+          <div class="stat-value">18.4k</div>
+          <div class="bars">
+            <div style="height:30%"></div><div style="height:50%"></div><div style="height:40%"></div>
+            <div style="height:80%"></div><div style="height:60%"></div><div style="height:45%"></div>
+            <div style="height:70%"></div>
+          </div>
+        </div>
+        <div class="panel">
+          <h5>Tool calls by name</h5>
+          <div class="stat-value">read_workspace_file <span style="font-size:1rem;color:var(--text-dim)">×12</span></div>
+          <div class="bars">
+            <div style="height:60%;background:var(--accent-3)"></div><div style="height:30%;background:var(--accent-3)"></div>
+            <div style="height:15%;background:var(--accent-3)"></div>
+          </div>
+        </div>
+        <div class="panel" style="grid-column: 1 / -1;">
+          <h5>Live log stream</h5>
+          <div class="logline">2026-10-02T14:02:11Z <span class="lvl-info">INFO</span> event=startup message="logged in as hermes#0841"</div>
+          <div class="logline">2026-10-02T14:03:47Z <span class="lvl-info">INFO</span> event=task_status_change task_id=12 task_status=In Progress</div>
+          <div class="logline">2026-10-02T14:04:02Z <span class="lvl-info">INFO</span> event=note_generated task_id=12 word_count=612 latency_ms=14300</div>
+          <div class="logline">2026-10-02T14:07:19Z <span class="lvl-err">ERROR</span> event=error error_type=llm_api_error message="timeout contacting LLM backend"</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="chat">
+  <div class="wrap">
+    <h2>Chat concept — Discord &amp; Revolt</h2>
+    <p class="lede">
+      Same command router, same behavior, two chat platforms — illustrative conversation, not a
+      live session.
+    </p>
+    <div class="chat-mocks">
+      <div class="chat-mock">
+        <div class="chat-mock-header discord">💬 Discord</div>
+        <div class="chat-body">
+          <div class="msg user"><div class="meta">you</div>!hermes summarize https://youtu.be/example</div>
+          <div class="msg bot"><div class="meta">Hermes</div>[Task Queued] Task ID #12 created — processing "https://youtu.be/example"...</div>
+          <div class="msg bot"><div class="meta">Hermes</div>[Task #12 Completed] Note saved: <code class="inline">12-example.md</code> | 612 words | 14.3s</div>
+        </div>
+      </div>
+      <div class="chat-mock">
+        <div class="chat-mock-header revolt">💬 Revolt</div>
+        <div class="chat-body">
+          <div class="msg user"><div class="meta">you</div>!hermes task Research LM Studio quantization options</div>
+          <div class="msg bot"><div class="meta">Hermes</div>[Task Created] Task ID #13: "Research LM Studio quantization options" (status: Backlog)</div>
+          <div class="msg user"><div class="meta">you</div>@Hermes what's the capital of Japan?</div>
+          <div class="msg bot"><div class="meta">Hermes</div>Tokyo.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="security">
+  <div class="wrap">
+    <h2>Why it's safe to run</h2>
+    <p class="lede">Security isn't a bolt-on here — it shapes the architecture itself.</p>
+    <div class="feature-grid">
+      <div class="feature">
+        <h4>🔒 Scoped network egress</h4>
+        <p>Only the agent container can reach the internet. The observability stack is firewall-blocked from all outbound traffic, enforced at the host, not just Docker config.</p>
+      </div>
+      <div class="feature">
+        <h4>🗂️ Sandboxed file tools</h4>
+        <p>Every LLM-requested file path is checked against the workspace root on every call — the one place a prompt-injected response could try to escape.</p>
+      </div>
+      <div class="feature">
+        <h4>🔑 Secrets never touch config</h4>
+        <p>Tokens and API keys are read from the environment only, never from any YAML file — a leaked config can't leak a credential.</p>
+      </div>
+      <div class="feature">
+        <h4>🧱 Hardened containers</h4>
+        <p>cap_drop ALL, no-new-privileges, read-only root filesystem, non-root user — on every service, not just the agent.</p>
+      </div>
+      <div class="feature">
+        <h4>📋 Deliberate, documented tradeoffs</h4>
+        <p>Every exception to the default-deny posture is written down with its reasoning — not a silent gap, a stated one.</p>
+      </div>
+      <div class="feature">
+        <h4>🗃️ Local-only task tracking</h4>
+        <p>A simple SQLite task DB, not a real external integration — no extra credentials or attack surface for something that doesn't need one yet.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    Educational/personal lab project — not affiliated with Discord or Revolt.
+    <br>
+    <a href="https://github.com/cv-ai-sec/cv-hermes">github.com/cv-ai-sec/cv-hermes</a>
+  </div>
+</footer>
+
+</body>
+</html>

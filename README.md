@@ -5,6 +5,10 @@ client) running inside a dedicated Rocky Linux 9 VM, with local observability vi
 Promtail — token usage, task latency, tool calls, and error rates, all tracked without any data
 leaving the VM except Hermes's own traffic to Discord and your chosen LLM API.
 
+**[→ Live concept preview](https://cv-ai-sec.github.io/cv-hermes/)** — a static page showing the
+architecture, a mock Grafana dashboard, and a mock Discord/Revolt conversation, viewable without
+running any of this yourself (no build step; see "Publishing the concept page" below).
+
 Runs inside a VirtualBox Rocky Linux 9 VM — see [docs/INSTALL.md](docs/INSTALL.md) for the full
 setup (any hypervisor in the spec table below works; that guide covers VirtualBox specifically).
 Already running and just need a URL or a command? See [docs/USER-GUIDE.md](docs/USER-GUIDE.md).
@@ -76,6 +80,8 @@ unless `REVOLT_TOKEN` is set in `.env`.
 .
 ├── .gitignore
 ├── .env.example
+├── .nojekyll         # forces GitHub Pages to serve index.html directly, no Jekyll build
+├── index.html        # static concept/demo page for GitHub Pages — no build step, no live data
 ├── docker-compose.yml
 ├── README.md
 ├── docs/             # ARCHITECTURE.md, INSTALL.md, SECURITY.md, USER-GUIDE.md
@@ -146,6 +152,18 @@ GRAFANA_API_TOKEN="glsa_xxx" bash scripts/export_grafana_dashboards.sh
 
 (Create the token under Grafana → Administration → Service accounts — never use your admin
 password here.)
+
+## Publishing the concept page (GitHub Pages)
+
+`index.html` at the repo root is entirely static — mock data only, not connected to any live VM,
+Grafana instance, or bot. No build step, so like `llm-security-labs` (and unlike
+`ai-cybersecurity-devops-lab`'s Vite dashboard), GitHub Actions isn't needed.
+
+**One-time setup:** on GitHub, go to **Settings → Pages** and set **Source** to **Deploy from a
+branch**, branch `main`, folder `/ (root)`. `.nojekyll` is already committed at the repo root — this
+repo previously hit a 404 on a sibling project from GitHub Pages' default Jekyll processing
+silently never completing a build; that file forces Pages to serve `index.html` directly instead.
+After that one-time setup, just push to `main` and the page updates within a minute or two.
 
 ## Disclaimer
 
