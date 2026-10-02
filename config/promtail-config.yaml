@@ -1,0 +1,44 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: hermes-agent
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: hermes-agent
+          __path__: /var/log/hermes/*.jsonl
+
+    pipeline_stages:
+      # Hermes Agent logs one JSON object per line (see hermes_agent/metrics.py).
+      - json:
+          expressions:
+            level: level
+            event: event          # task_start | task_latency | token_usage | tool_call | error
+            latency_ms: latency_ms
+            tokens_prompt: tokens_prompt
+            tokens_completion: tokens_completion
+            tool_name: tool_name
+            error_type: error_type
+            timestamp: timestamp
+
+      # Low-cardinality labels only — never label on user/guild/message IDs, that blows up
+      # Loki's index for no query benefit in a single-bot lab this size.
+      - labels:
+          level:
+          event:
+
+      - timestamp:
+          source: timestamp
+          format: RFC3339
+
+      # latency_ms / tokens_prompt / tokens_completion stay in the log line (queryable in
+      # Grafana via `| json | unwrap latency_ms`), not as labels — high-cardinality numeric
+      # values make poor label choices and would bloat Loki's index for no query benefit.

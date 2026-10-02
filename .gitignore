@@ -1,0 +1,30 @@
+# --- Secrets & environment ---
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+keys/
+
+# --- Runtime data & logs ---
+data/
+*.log
+logs/
+workspace/*
+!workspace/.gitkeep
+
+# --- Loki / Grafana runtime state (bind-mounted volumes) ---
+loki-data/
+grafana-data/
+
+# --- Python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,29 @@
+# Non-secret runtime config for Hermes Agent.
+# Secrets (tokens, API keys) stay in .env — never put them here.
+# Copy to hermes.yaml if you want file-based overrides; env vars always take precedence.
+
+log_level: INFO
+log_format: json          # json | text — keep "json" so Promtail's pipeline stages parse cleanly
+log_file: /var/log/hermes/hermes.jsonl
+
+discord:
+  command_prefix: "!hermes "
+  mention_trigger: true    # respond when @mentioned in addition to the prefix command
+  allowed_guild_ids: []    # empty = allow any guild the bot is invited to
+
+llm:
+  request_timeout_seconds: 60
+  max_tokens: 1024
+  temperature: 0.4
+
+workspace:
+  root: /workspace
+  max_file_bytes: 5242880  # 5 MB per file written into the sandboxed workspace
+
+tools:
+  # Allowlist of tool names the agent may invoke. Keep this explicit and short —
+  # an agent with an open-ended tool set inside a Discord-facing container is a bigger blast radius.
+  allowed:
+    - read_workspace_file
+    - write_workspace_file
+    - list_workspace_files
