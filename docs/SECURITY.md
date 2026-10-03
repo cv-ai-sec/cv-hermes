@@ -30,6 +30,13 @@ not just on the first commit.
 - **Every container hardened.** `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`,
   `read_only: true` root filesystem, non-root user, SELinux `:Z` volume labels — on every service in
   `docker-compose.yml`, not just hermes-agent.
+- **Task dashboard and local web chat have no authentication of their own**, same as Grafana — both
+  rely entirely on firewalld restricting their published ports (`TASK_DASHBOARD_PORT`,
+  `WEB_CHAT_PORT`) to `LOCAL_SUBNET`. Acceptable for a single-user home lab only; see
+  `docs/ARCHITECTURE.md`'s Trust boundaries section before widening either firewalld rule.
+- **`config/soul.md` is plain-text persona config, not a secret.** It's committed to the repo
+  intentionally (unlike `.env`) — never put credentials, internal IPs, or anything sensitive in it,
+  since it ships with the code, not with `.env`.
 
 ## Pre-commit checklist (run this before every `git add`, not just the first one)
 
@@ -53,10 +60,14 @@ not just on the first commit.
    force-added, and that any example log line or generated note checked into a doc is synthetic, not
    pulled from a real run.
 6. **New dependencies are permissively licensed.** Check the license of anything added to
-   `hermes_agent/requirements.txt` before adding it (discord.py and aiohttp are Apache-2.0, yt-dlp is
-   Unlicense/public-domain — keep new additions MIT/Apache-2.0/BSD-equivalent). `revolt.py` is
-   deliberately NOT installed (dependency conflict with `openai` — see `requirements.txt`); if it's
-   ever re-added, verify its actual license on whatever version installs, not assumed.
+   `hermes_agent/requirements.txt` or `task_dashboard/requirements.txt` before adding it (discord.py
+   and aiohttp are Apache-2.0, yt-dlp is Unlicense/public-domain, fastapi and uvicorn are MIT — keep
+   new additions MIT/Apache-2.0/BSD-equivalent). `revolt.py` is deliberately NOT installed (dependency
+   conflict with `openai` — see `requirements.txt`); if it's ever re-added, verify its actual license
+   on whatever version installs, not assumed.
+7. **soul.md stays generic.** If `config/soul.md` was edited this session, confirm nothing specific
+   to your real network (hostnames, real IP ranges, internal service names) was written into it —
+   it's committed to the repo, unlike `.env`.
 
 ## If you find something real
 

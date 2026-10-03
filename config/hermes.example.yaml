@@ -25,6 +25,10 @@ llm:
   request_timeout_seconds: 60
   max_tokens: 1024
   temperature: 0.4
+  # Informational only — the context size of whatever model is loaded in LM Studio.
+  # Not enforced or read back from the backend; used only to estimate % of context
+  # used per call for the health heartbeat. Keep in sync by hand with your model.
+  context_window: 8192
 
 workspace:
   root: /workspace
@@ -37,6 +41,9 @@ tools:
     - read_workspace_file
     - write_workspace_file
     - list_workspace_files
+
+soul_path: /app/config/soul.md
+health_interval_seconds: 300
 
 tasks:
   # SQLite task DB + generated notes for the `summarize`/`task` commands. Paths are

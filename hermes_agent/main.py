@@ -9,6 +9,15 @@ revolt_adapter.py) but revolt.py is NOT currently installed (see
 requirements.txt for why — a hard dependency conflict with openai, not a
 decision to drop Revolt support permanently) — setting REVOLT_TOKEN without
 it installed raises a clear RuntimeError below rather than an import crash.
+
+The web adapter (hermes_agent/adapters/web_adapter.py) needs no token — it's a local
+browser chat UI over the same CommandRouter, for talking to Hermes without Discord at
+all. Enabled by default (WEB_CHAT_ENABLED); see docs/ARCHITECTURE.md.
+
+Also starts a background health heartbeat (health.py) alongside the chat adapters —
+periodic signal on whether the soul.md persona loaded, whether the LLM backend is
+reachable, and estimated context-window usage, all visible in Grafana the same way
+token usage already is.
 """
 
 from __future__ import annotations
@@ -17,8 +26,10 @@ import asyncio
 
 from . import metrics
 from .adapters.discord_adapter import DiscordAdapter
+from .adapters.web_adapter import WebAdapter
 from .bot.commands import CommandRouter
 from .config import Settings
+from .health import heartbeat_loop
 from .services.notes_service import NotesService
 from .services.task_db import TaskDB
 from .services.transcript_service import TranscriptService
@@ -87,12 +98,25 @@ async def _run(settings: Settings) -> None:
         revolt_adapter.on_message = router.handle
         adapters.append(revolt_adapter)
 
+    if settings.web_chat_enabled:
+        # No token needed — reachability is restricted at the host firewall instead
+        # (see docs/INSTALL.md). This is the "chat with Hermes without Discord" path.
+        web_adapter = WebAdapter(port=settings.web_chat_port)
+        web_adapter.on_message = router.handle
+        adapters.append(web_adapter)
+
     if not adapters:
         raise RuntimeError(
-            "No chat platform configured — set DISCORD_TOKEN and/or REVOLT_TOKEN in .env."
+            "No chat platform configured — set DISCORD_TOKEN/REVOLT_TOKEN, or leave "
+            "WEB_CHAT_ENABLED=true, in .env."
         )
 
-    await asyncio.gather(*(adapter.start() for adapter in adapters))
+    heartbeat = heartbeat_loop(
+        router,
+        interval_seconds=settings.health_interval_seconds,
+        adapter_names=[adapter.name for adapter in adapters],
+    )
+    await asyncio.gather(*(adapter.start() for adapter in adapters), heartbeat)
 
 
 def main() -> None:

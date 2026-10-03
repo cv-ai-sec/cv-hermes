@@ -43,6 +43,15 @@ class Settings:
         self.llm_timeout = llm_cfg.get("request_timeout_seconds", 60)
         self.llm_max_tokens = llm_cfg.get("max_tokens", 1024)
         self.llm_temperature = llm_cfg.get("temperature", 0.4)
+        # Informational only — the context size of whatever model is actually loaded in
+        # LM Studio (or whatever LLM_API_BASE points at). Not enforced or read back from
+        # the backend (OpenAI-compatible APIs don't expose it generically), so this must
+        # be kept in sync by hand with your loaded model. Used only to estimate % of
+        # context used per call for the health heartbeat (see health.py) — never to
+        # truncate or reject a request.
+        self.llm_context_window = int(
+            os.environ.get("LLM_CONTEXT_WINDOW", llm_cfg.get("context_window", 8192))
+        )
 
         # Shared across every chat platform — a message is addressed the same way
         # whether it arrives via Discord or Revolt.
@@ -87,6 +96,18 @@ class Settings:
                 "MAX_TRANSCRIPT_CHARS", tasks_cfg.get("max_transcript_chars", 20000)
             )
         )
+
+        # --- Hermes identity + health ---
+        self.soul_path = os.environ.get(
+            "SOUL_MD_PATH", yaml_cfg.get("soul_path", "/app/config/soul.md")
+        )
+        self.health_interval_seconds = int(
+            os.environ.get("HEALTH_INTERVAL_SECONDS", yaml_cfg.get("health_interval_seconds", 300))
+        )
+
+        # --- Local web chat (bypasses Discord entirely) ---
+        self.web_chat_enabled = os.environ.get("WEB_CHAT_ENABLED", "true").strip().lower() == "true"
+        self.web_chat_port = int(os.environ.get("WEB_CHAT_PORT", "8503"))
 
     def validate(self) -> None:
         missing = [

@@ -4,8 +4,8 @@
 #   - base packages + git
 #   - Docker CE + the Compose plugin (podman-compose also works with this
 #     repo's docker-compose.yml if you prefer Podman; see README.md)
-#   - firewalld: SSH kept on, Grafana (3000) opened to the local subnet only,
-#     everything else closed to the outside
+#   - firewalld: SSH kept on, Grafana (3000), the task dashboard (8502), and the local
+#     web chat UI (8503) opened to the local subnet only, everything else closed off
 #   - an explicit firewalld rule blocking the observability network (Loki/
 #     Promtail/Grafana) from reaching the internet at all, since none of
 #     those three services need outbound access to do their job
@@ -28,6 +28,10 @@ GRAFANA_PORT="${GRAFANA_PORT:-3000}"
 # Must match TASK_DASHBOARD_PORT in .env (default 8502). Same local-subnet-only
 # posture as Grafana — the task dashboard has no login of its own.
 TASK_DASHBOARD_PORT="${TASK_DASHBOARD_PORT:-8502}"
+
+# Must match WEB_CHAT_PORT in .env (default 8503). Same local-subnet-only posture —
+# the local web chat UI (bypasses Discord) has no login of its own either.
+WEB_CHAT_PORT="${WEB_CHAT_PORT:-8503}"
 
 # Must match the `obs-net` subnet in docker-compose.yml. Loki/Promtail/Grafana
 # live here and have no legitimate reason to reach the internet — see
@@ -89,6 +93,10 @@ firewall-cmd --permanent --zone=public --remove-port="${GRAFANA_PORT}/tcp" 2>/de
 firewall-cmd --permanent --zone=public --add-rich-rule="rule family='ipv4' source address='${LOCAL_SUBNET}' port port='${TASK_DASHBOARD_PORT}' protocol='tcp' accept"
 firewall-cmd --permanent --zone=public --remove-port="${TASK_DASHBOARD_PORT}/tcp" 2>/dev/null || true
 
+# Local web chat UI: same local-subnet-only posture as Grafana above.
+firewall-cmd --permanent --zone=public --add-rich-rule="rule family='ipv4' source address='${LOCAL_SUBNET}' port port='${WEB_CHAT_PORT}' protocol='tcp' accept"
+firewall-cmd --permanent --zone=public --remove-port="${WEB_CHAT_PORT}/tcp" 2>/dev/null || true
+
 # Observability stack (Loki/Promtail/Grafana) has no legitimate reason to
 # reach the internet — block its egress outright at the host firewall rather
 # than relying on Docker network config alone (Docker's `internal: true`
@@ -103,6 +111,7 @@ firewall-cmd --reload
 echo "==> Done."
 echo "    Grafana will be reachable at http://<VM_IP>:${GRAFANA_PORT} from ${LOCAL_SUBNET} only."
 echo "    Task dashboard will be reachable at http://<VM_IP>:${TASK_DASHBOARD_PORT} from ${LOCAL_SUBNET} only."
+echo "    Local web chat will be reachable at http://<VM_IP>:${WEB_CHAT_PORT} from ${LOCAL_SUBNET} only."
 echo "    The observability network (${OBS_NET_SUBNET}) cannot reach the internet."
 echo "    hermes-agent's own network (agent-net) is left open for outbound Discord/LLM traffic."
 echo "    Next: cp .env.example .env, fill in real values, then: docker compose up -d"

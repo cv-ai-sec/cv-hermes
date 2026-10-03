@@ -43,6 +43,14 @@ class _JsonFormatter(logging.Formatter):
             "task_id",
             "task_status",
             "word_count",
+            # --- Hermes health (see health.py) ---
+            "soul_loaded",
+            "soul_chars",
+            "llm_reachable",
+            "context_window",
+            "context_pct",
+            "uptime_seconds",
+            "adapters_active",
         ):
             value = getattr(record, key, None)
             if value is not None:
@@ -89,6 +97,37 @@ def log_token_usage(tokens_prompt: int, tokens_completion: int, guild_id: int | 
         message="llm token usage",
         tokens_prompt=tokens_prompt,
         tokens_completion=tokens_completion,
+        guild_id=guild_id,
+    )
+
+
+def log_health_heartbeat(
+    soul_loaded: bool,
+    soul_chars: int,
+    llm_reachable: bool,
+    context_window: int,
+    uptime_seconds: float,
+    adapters_active: str,
+) -> None:
+    # Booleans logged as 1/0, not true/false — LogQL's `unwrap` (used by the Hermes
+    # health Grafana panels) needs a numeric-parsable value, not a JSON boolean.
+    log_event(
+        "health_heartbeat",
+        message="hermes health heartbeat",
+        soul_loaded=int(soul_loaded),
+        soul_chars=soul_chars,
+        llm_reachable=int(llm_reachable),
+        context_window=context_window,
+        uptime_seconds=uptime_seconds,
+        adapters_active=adapters_active,
+    )
+
+
+def log_context_usage(context_pct: float, guild_id: int | None = None) -> None:
+    log_event(
+        "context_usage",
+        message="estimated context window usage",
+        context_pct=round(context_pct, 1),
         guild_id=guild_id,
     )
 

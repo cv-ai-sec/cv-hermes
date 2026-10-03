@@ -3,6 +3,7 @@
 ```mermaid
 graph LR
   A[Discord Gateway] <-->|via NAT adapter| B[Hermes Agent]
+  V[Browser web chat] <-->|host-only IP, LOCAL_SUBNET only| B
   B -->|chat completion| C[LM Studio on Windows host]
   B -->|summarize command| Y[yt-dlp: transcript only]
   Y --> B
@@ -12,7 +13,7 @@ graph LR
   U -->|host-only IP, LOCAL_SUBNET only| W
   B -->|JSON log lines, shared volume| D[Promtail]
   D -->|HTTP push :3100| E[Loki]
-  F[Grafana] -->|query| E
+  F[Grafana] -->|query, incl. Hermes health| E
   U[User's browser] -->|host-only IP, LOCAL_SUBNET only| F
 ```
 
@@ -25,7 +26,7 @@ model.
 
 | Component | Role | Network exposure |
 |---|---|---|
-| Hermes Agent (`hermes_agent/`) | discord.py bot + OpenAI-compatible LLM client; sandboxed file tools; transcript/notes/task pipeline | `agent-net` — the one container allowed outbound internet, to the Discord Gateway, LM Studio on the Windows host, and YouTube (for transcript fetching via `yt-dlp`) |
+| Hermes Agent (`hermes_agent/`) | discord.py bot + local web chat (`adapters/web_adapter.py`) + OpenAI-compatible LLM client; sandboxed file tools; transcript/notes/task pipeline; background health heartbeat (`health.py`) | `agent-net` — the one container allowed outbound internet, to the Discord Gateway, LM Studio on the Windows host, and YouTube (for transcript fetching via `yt-dlp`). Also publishes `WEB_CHAT_PORT` inbound, firewalld-restricted to `LOCAL_SUBNET` like Grafana. |
 | Loki (`config/loki-config.yaml`) | Log storage | `obs-net` only — no internet, see Trust boundaries |
 | Promtail (`config/promtail-config.yaml`) | Tails the shared `hermes-logs` volume, ships lines to Loki | `obs-net` only — no internet |
 | Grafana (`dashboards/hermes-overview.json`) | Dashboards over Loki: errors/min, task latency p50/p95, token usage, tool calls, live log stream | `obs-net` + one published port (`GRAFANA_PORT`), reached via the VM's host-only IP and firewalld-restricted to `LOCAL_SUBNET` — no NAT port-forward (see `docs/INSTALL.md` for why) |
@@ -41,7 +42,16 @@ Built around one shared interface (`hermes_agent/adapters/base.py`'s `ChatAdapte
 platform a message arrived from — adding a platform later means writing one new adapter module, not
 touching command logic.
 
-**Discord is fully supported.** **Revolt is scaffolded but not currently functional** — the adapter
+**Discord and the local web chat are both fully supported.** The web adapter
+(`hermes_agent/adapters/web_adapter.py`) runs an embedded FastAPI/uvicorn server inside the same
+process as the Discord adapter, serving a small browser chat page over a WebSocket. It calls
+`CommandRouter.handle()` exactly like Discord does — `summarize`/`task`/plain chat all behave
+identically — so chatting with Hermes no longer requires a Discord account, server, or token at all.
+No auth of its own; same firewalld-restricted-to-`LOCAL_SUBNET` posture as Grafana and the task
+dashboard (see `WEB_CHAT_PORT` in `.env.example`). Set `WEB_CHAT_ENABLED=false` for a Discord-only
+deployment.
+
+**Revolt is scaffolded but not currently functional** — the adapter
 code exists (`hermes_agent/adapters/revolt_adapter.py`), but `revolt.py` (the only readily-available
 Python Revolt library at the time this was built) hard-pins dependencies (`aiohttp==3.7.4.post0`,
 `typing-extensions==4.0.1`) that conflict with `openai`'s own requirements — confirmed via two
@@ -103,12 +113,46 @@ decide what kind of task it is and what pipeline to run) worth building once the
 workflow that needs it, not speculatively. Today the dashboard's value is organizing/viewing what's
 already there and a faster way to jot a task than a Discord command — not autonomous pickup.
 
+## Hermes health
+
+Two things were previously invisible and are now tracked the same way token usage already is — via
+`metrics.py` events shipped through Promtail/Loki to a "Hermes health" panel row in
+`dashboards/hermes-overview.json`:
+
+1. **Persona/system-prompt status.** `hermes_agent/soul.py` loads `config/soul.md` once at startup
+   as `CommandRouter`'s system prompt (`soul_path`/`SOUL_MD_PATH`, see `.env.example`). If the file
+   is missing or empty, it silently falls back to a generic built-in default (`DEFAULT_SOUL`) rather
+   than crashing — a working but depersonalized bot is better than a crash-looping one. "Silently"
+   is the problem that's fixed here: the `soul_loaded` field on the `health_heartbeat` event (and a
+   one-time `soul_loaded` event at startup) makes that fallback visible in Grafana instead of only
+   discoverable by reading logs.
+2. **Context window usage.** There is still no persistent conversation memory — every chat call
+   sends only the system prompt + that one message, nothing before it (see the "Discord message ->
+   LLM" trust boundary below; this hasn't changed — it's just visible now). What *is* new is `hermes_agent/health.py`
+   estimating token usage per call (`~len(text)/4`, a heuristic, not a real tokenizer — see its
+   module docstring) against `LLM_CONTEXT_WINDOW` (informational only, keep it in sync by hand with
+   whatever model is actually loaded) and logging it as `context_usage`/`context_pct`. A context
+   overflow from the LLM backend is also now distinguished as its own `llm_context_overflow`
+   `error_type` in `commands.py`, rather than folding into the generic `llm_api_error` bucket —
+   visible as its own Grafana panel instead of hidden inside "something errored."
+
+A background heartbeat (`health.heartbeat_loop`, started alongside the chat adapters in `main.py`,
+interval `HEALTH_INTERVAL_SECONDS`) also pings the configured LLM backend (`llm.models.list()`) and
+logs reachability, uptime, and which adapters are active — so "is Hermes actually healthy right now"
+is answerable from Grafana without SSHing in and tailing logs.
+
+**Deliberately not built here:** auto-restart, automatic model fallback, or any other action taken
+*because of* a health signal. This is observability only, same as the rest of the Grafana stack —
+acting on these signals (e.g. alerting, or truncating/rejecting a request that would overflow
+context) is a real follow-up, not something to bolt on silently alongside a health dashboard.
+
 ## Trust boundaries
 
-- **Discord message → LLM:** every inbound message is treated as untrusted input to the model, not
-  as instructions to the agent process itself. The agent never executes shell commands or arbitrary
-  code derived from a message — the only actions available to the LLM are the three tools in
-  `config/hermes.example.yaml`'s `tools.allowed` list.
+- **Chat message (Discord or web) → LLM:** every inbound message, regardless of which adapter it
+  arrived through, is treated as untrusted input to the model, not as instructions to the agent
+  process itself. The agent never executes shell commands or arbitrary code derived from a message —
+  the only actions available to the LLM are the three tools in `config/hermes.example.yaml`'s
+  `tools.allowed` list.
 - **LLM response → filesystem:** `hermes_agent/tools.py`'s `WorkspaceTools._resolve()` is the one
   place a prompt-injected or hallucinated file path (e.g. `../../etc/passwd`) gets checked and
   rejected, on every call, not just at startup. This is the sandbox boundary for the one tool
@@ -132,6 +176,10 @@ already there and a faster way to jot a task than a Discord command — not auto
   reach that subnet can view/add/edit/delete tasks. Acceptable for a single-user home lab; do not
   change `TASK_DASHBOARD_PORT`'s firewalld rule to allow a wider source range without adding real
   auth first.
+- **Local web chat has no authentication of its own either:** same model as the task dashboard and
+  Grafana — firewalld restricts `WEB_CHAT_PORT` to `LOCAL_SUBNET`, not an app-level login. Anyone who
+  can reach that subnet can chat with Hermes, including running `summarize`/`task`. Acceptable for a
+  single-user home lab; do not widen that firewalld rule without adding real auth first.
 - **Two writers, one SQLite file:** `hermes-agent` and `task-dashboard` both open `./data/tasks.db`
   concurrently. WAL mode + a 10s busy timeout (set in both `task_db.py` and `task_dashboard/db.py`)
   make simultaneous access safe rather than erroring with "database is locked" — but it's

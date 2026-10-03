@@ -21,13 +21,18 @@ scrape_configs:
       - json:
           expressions:
             level: level
-            event: event          # task_start | task_latency | token_usage | tool_call | error
+            event: event          # task_start | task_latency | token_usage | tool_call | error | health_heartbeat | context_usage | soul_loaded
             latency_ms: latency_ms
             tokens_prompt: tokens_prompt
             tokens_completion: tokens_completion
             tool_name: tool_name
             error_type: error_type
             timestamp: timestamp
+            # --- Hermes health (see hermes_agent/health.py) ---
+            soul_loaded: soul_loaded
+            llm_reachable: llm_reachable
+            context_pct: context_pct
+            uptime_seconds: uptime_seconds
 
       # Low-cardinality labels only — never label on user/guild/message IDs, that blows up
       # Loki's index for no query benefit in a single-bot lab this size.

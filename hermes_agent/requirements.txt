@@ -6,6 +6,10 @@ openai==1.51.0
 httpx==0.27.2
 PyYAML==6.0.2
 
+# --- Local web chat adapter (bypasses Discord, see adapters/web_adapter.py) ---
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
 # --- Task automation pipeline (summarize/task commands) ---
 # Deliberately NOT pinned to an exact version. yt-dlp needs to keep up with YouTube's
 # extraction internals changing, and an old pinned version reliably breaks with errors

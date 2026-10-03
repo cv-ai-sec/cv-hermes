@@ -89,26 +89,29 @@ scp -P 2223 -r "D:\Ai projects\Projects\cv-hermes" <user>@127.0.0.1:~/
 
 Open `scripts/00_setup_rocky9_host.sh` first and check the variables at the top — `LOCAL_SUBNET`
 defaults to `192.168.56.0/24` (the host-only subnet from step 2), `GRAFANA_PORT` defaults to `3000`,
-and `TASK_DASHBOARD_PORT` defaults to `8502`; only change these if your host-only network uses a
-different range, or a default port is unavailable for some other reason.
+`TASK_DASHBOARD_PORT` defaults to `8502`, and `WEB_CHAT_PORT` defaults to `8503`; only change these
+if your host-only network uses a different range, or a default port is unavailable for some other
+reason.
 
 ```bash
 sudo bash scripts/00_setup_rocky9_host.sh
 ```
 
 This installs Docker CE + the Compose plugin, `git`, configures `firewalld` (SSH + Grafana + the
-task dashboard from `LOCAL_SUBNET` only + blocks `obs-net`'s egress entirely), and sets the SELinux
-boolean containers need under enforcing mode.
+task dashboard + the local web chat UI, all from `LOCAL_SUBNET` only + blocks `obs-net`'s egress
+entirely), and sets the SELinux boolean containers need under enforcing mode.
 
-**Already provisioned this VM before the task dashboard existed?** The script is safe to re-run in
-full (its `firewall-cmd` calls are idempotent), or apply just the two new rules by hand:
+**Already provisioned this VM before the task dashboard/web chat existed?** The script is safe to
+re-run in full (its `firewall-cmd` calls are idempotent), or apply just the new rules by hand:
 ```bash
 sudo firewall-cmd --permanent --zone=public --add-rich-rule="rule family='ipv4' source address='192.168.56.0/24' port port='8502' protocol='tcp' accept"
 sudo firewall-cmd --permanent --zone=public --remove-port='8502/tcp' 2>/dev/null || true
+sudo firewall-cmd --permanent --zone=public --add-rich-rule="rule family='ipv4' source address='192.168.56.0/24' port port='8503' protocol='tcp' accept"
+sudo firewall-cmd --permanent --zone=public --remove-port='8503/tcp' 2>/dev/null || true
 sudo firewall-cmd --reload
 ```
-(swap in your actual `LOCAL_SUBNET`/`TASK_DASHBOARD_PORT` if you changed the defaults) — and record
-the change in `Projects\firewall-audit-log\CHANGELOG.md` per this workspace's standing convention.
+(swap in your actual `LOCAL_SUBNET`/ports if you changed the defaults) — and record the change in
+`Projects\firewall-audit-log\CHANGELOG.md` per this workspace's standing convention.
 
 Log out and back in (or `newgrp docker`) so your user's new `docker` group membership takes effect:
 

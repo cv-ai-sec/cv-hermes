@@ -22,6 +22,13 @@ services:
       # container's non-root user) — see docs/INSTALL.md's troubleshooting section.
       - ./notes:/app/notes:Z
       - ./data:/app/data:Z
+    ports:
+      # Local web chat UI (hermes_agent/adapters/web_adapter.py) — bypasses Discord
+      # entirely. Same posture as Grafana/task-dashboard: bound to all interfaces at
+      # the Docker level, firewalld on the VM restricts actual reachability to
+      # LOCAL_SUBNET only. No auth of its own. Set WEB_CHAT_ENABLED=false in .env to
+      # disable it (e.g. Discord-only deployments) rather than removing this line.
+      - "${WEB_CHAT_PORT:-8503}:${WEB_CHAT_PORT:-8503}"
     networks:
       - agent-net
     extra_hosts:
