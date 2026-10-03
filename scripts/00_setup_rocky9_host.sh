@@ -25,6 +25,10 @@ LOCAL_SUBNET="${LOCAL_SUBNET:-192.168.56.0/24}"
 # Must match GRAFANA_PORT in .env (default 3000).
 GRAFANA_PORT="${GRAFANA_PORT:-3000}"
 
+# Must match TASK_DASHBOARD_PORT in .env (default 8502). Same local-subnet-only
+# posture as Grafana — the task dashboard has no login of its own.
+TASK_DASHBOARD_PORT="${TASK_DASHBOARD_PORT:-8502}"
+
 # Must match the `obs-net` subnet in docker-compose.yml. Loki/Promtail/Grafana
 # live here and have no legitimate reason to reach the internet — see
 # README.md's "Network isolation" section for why this is split from the
@@ -81,6 +85,10 @@ firewall-cmd --permanent --zone=public --add-rich-rule="rule family='ipv4' sourc
 # Explicitly drop any other inbound attempt at this port that didn't match the rule above.
 firewall-cmd --permanent --zone=public --remove-port="${GRAFANA_PORT}/tcp" 2>/dev/null || true
 
+# Task dashboard: same local-subnet-only posture as Grafana above.
+firewall-cmd --permanent --zone=public --add-rich-rule="rule family='ipv4' source address='${LOCAL_SUBNET}' port port='${TASK_DASHBOARD_PORT}' protocol='tcp' accept"
+firewall-cmd --permanent --zone=public --remove-port="${TASK_DASHBOARD_PORT}/tcp" 2>/dev/null || true
+
 # Observability stack (Loki/Promtail/Grafana) has no legitimate reason to
 # reach the internet — block its egress outright at the host firewall rather
 # than relying on Docker network config alone (Docker's `internal: true`
@@ -94,6 +102,7 @@ firewall-cmd --reload
 
 echo "==> Done."
 echo "    Grafana will be reachable at http://<VM_IP>:${GRAFANA_PORT} from ${LOCAL_SUBNET} only."
+echo "    Task dashboard will be reachable at http://<VM_IP>:${TASK_DASHBOARD_PORT} from ${LOCAL_SUBNET} only."
 echo "    The observability network (${OBS_NET_SUBNET}) cannot reach the internet."
 echo "    hermes-agent's own network (agent-net) is left open for outbound Discord/LLM traffic."
 echo "    Next: cp .env.example .env, fill in real values, then: docker compose up -d"

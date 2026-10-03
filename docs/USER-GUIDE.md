@@ -21,6 +21,7 @@ not guaranteed — re-check here if anything below stops resolving.
 | What | Where | Notes |
 |---|---|---|
 | Grafana (dashboards) | `http://<VM_host-only-IP>:<GRAFANA_PORT>` (default port `3000`) | Login: `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` from `.env`. Only reachable from `LOCAL_SUBNET` (firewalld-enforced). |
+| Task dashboard (view/add/edit tasks) | `http://<VM_host-only-IP>:<TASK_DASHBOARD_PORT>` (default port `8502`) | No login of its own — only reachable from `LOCAL_SUBNET` (firewalld-enforced), same posture as Grafana. Reads/writes the same `./data/tasks.db` the bot uses. |
 | Loki (log storage) | No direct URL — query only through Grafana | Not published outside `obs-net`; use Grafana's **Explore** view for ad-hoc LogQL, or the pre-built dashboard panels. |
 | SSH into the VM | `ssh -p 2223 <user>@127.0.0.1` (from Windows) | Port `2223`, not `2222` — `2222` is `ai-cybersecurity-devops-lab`'s VM. See `firewall-audit-log` if this ever changes. |
 | LM Studio (LLM backend) | Running on Windows, not browsable — check its own Developer tab | Reachable from the VM at `http://host.docker.internal:1234` (mapped to `HOST_LM_STUDIO_IP`). |
@@ -81,10 +82,11 @@ the "Browse notes/" link on the viewer page itself)
 docker compose down
 ```
 This sends `SIGTERM` and waits for each container to exit cleanly, rather than a hard kill — this
-matters here specifically because `hermes-agent` holds an open SQLite connection
-(`./data/tasks.db`) and Grafana/Loki have their own on-disk state; an abrupt stop risks leaving
-either in a corrupted or inconsistent state. `docker compose down` does **not** delete volumes or
-your bind-mounted `./notes`/`./data`/`./workspace` — your data is still there after this.
+matters here specifically because `hermes-agent` **and** `task-dashboard` both hold open SQLite
+connections to the same `./data/tasks.db` (WAL mode), and Grafana/Loki have their own on-disk state;
+an abrupt stop risks leaving either in a corrupted or inconsistent state. `docker compose down` does
+**not** delete volumes or your bind-mounted `./notes`/`./data`/`./workspace` — your data is still
+there after this.
 
 **Then shut down the VM's OS itself cleanly, over SSH — not a VirtualBox power-off:**
 ```bash
@@ -116,6 +118,13 @@ level.
 
 (`!hermes ` is the default prefix — check `COMMAND_PREFIX`/`chat.command_prefix` in your config if
 you've changed it.)
+
+A task can also be created straight from the [task dashboard](#quick-reference) — it lands in
+`Backlog` the same as `!hermes task` would. **Note:** the bot does not currently poll for
+dashboard-created tasks and act on them automatically — see ARCHITECTURE.md's "task dashboard"
+section for why that's a deliberate, scoped-out gap rather than a bug. Today the dashboard is a
+viewing/organizing surface (and a faster way to jot a task than typing a Discord command); it is not
+yet a queue Hermes drains on its own.
 
 ## Common day-2 operations
 

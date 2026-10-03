@@ -8,6 +8,8 @@ graph LR
   Y --> B
   B -->|note generation| N[./notes/*.md]
   B -->|task status| T[(SQLite task DB)]
+  W[Task Dashboard] -->|read/write, same file| T
+  U -->|host-only IP, LOCAL_SUBNET only| W
   B -->|JSON log lines, shared volume| D[Promtail]
   D -->|HTTP push :3100| E[Loki]
   F[Grafana] -->|query| E
@@ -30,6 +32,7 @@ model.
 | Sandboxed workspace (`hermes_agent/tools.py`, `./workspace`) | File read/write tools the LLM can call | No network role — a filesystem boundary, not a network one |
 | Task DB (`hermes_agent/services/task_db.py`, `./data/tasks.db`) | Local SQLite table tracking `Backlog`/`In Progress`/`Completed`/`Failed` task status | No network role; not a real AppFlowy/Affine integration, deliberately — see Trust boundaries |
 | Notes service (`hermes_agent/services/notes_service.py`, `./notes/`) | Generates structured markdown notes from a transcript via the LLM, writes them to disk | No network role beyond the LLM call already covered above |
+| Task Dashboard (`task_dashboard/`) | Browser UI to view, add, edit, and delete tasks in the same SQLite file `task_db.py` uses | `obs-net` + one published port (`TASK_DASHBOARD_PORT`) — same firewalld-restricted-to-`LOCAL_SUBNET`, no-NAT-forward posture as Grafana. No outbound internet, since it never needs to reach anything beyond the local SQLite file. |
 
 ## Chat platform adapters
 
@@ -79,6 +82,27 @@ summaries coherently) that isn't justified until there's an actual need for full
 long videos. A truncated note says so explicitly in its own content, rather than silently covering
 less than the user would assume.
 
+## Task dashboard
+
+`task_dashboard/` is a small standalone FastAPI service (its own container, its own Dockerfile —
+see `docker-compose.yml`) giving a browser view of the same task board the Discord `task`/
+`summarize` commands write to: list tasks by status, add one with a title/description, change its
+status, or delete it. It talks to `./data/tasks.db` directly, not through `hermes-agent` — see
+`task_dashboard/db.py`'s module docstring for why it's a standalone copy of the schema/pragmas
+rather than an import of `hermes_agent/services/task_db.py` (separate Docker build contexts; the
+only thing meant to be shared is the file, not the code — if the schema changes in one, mirror it in
+the other).
+
+**Deliberately not yet a queue Hermes drains.** Adding a task from the dashboard puts it in
+`Backlog`, visible there and over `!hermes task` lookups, but `hermes-agent` has no background
+poller watching for new `Backlog` rows and does not act on a dashboard-created task on its own — it
+only ever creates/updates tasks in direct response to a Discord command (`_handle_task`/
+`_handle_summarize` in `hermes_agent/bot/commands.py`). This is scoped out for now rather than an
+oversight: "ingest and act on a task created elsewhere" is a real feature (a polling loop, a way to
+decide what kind of task it is and what pipeline to run) worth building once there's an actual
+workflow that needs it, not speculatively. Today the dashboard's value is organizing/viewing what's
+already there and a faster way to jot a task than a Discord command — not autonomous pickup.
+
 ## Trust boundaries
 
 - **Discord message → LLM:** every inbound message is treated as untrusted input to the model, not
@@ -103,6 +127,18 @@ less than the user would assume.
   reach Discord and an LLM API), so a user directing it to fetch an arbitrary URL doesn't grant
   any network reach it didn't already have — it can't be used to reach `obs-net` (firewalld-blocked
   from everything) or pivot anywhere `agent-net` itself can't already go.
+- **Task dashboard has no authentication of its own:** same model as Grafana — it relies entirely on
+  firewalld restricting the published port to `LOCAL_SUBNET`, not an app-level login. Anyone who can
+  reach that subnet can view/add/edit/delete tasks. Acceptable for a single-user home lab; do not
+  change `TASK_DASHBOARD_PORT`'s firewalld rule to allow a wider source range without adding real
+  auth first.
+- **Two writers, one SQLite file:** `hermes-agent` and `task-dashboard` both open `./data/tasks.db`
+  concurrently. WAL mode + a 10s busy timeout (set in both `task_db.py` and `task_dashboard/db.py`)
+  make simultaneous access safe rather than erroring with "database is locked" — but it's
+  last-writer-wins on a given row, not transactional isolation across the two services. Accepted at
+  this scale (a personal task list, not concurrent multi-user writes); a real conflict would need
+  both services editing the exact same task within the same ~second, which isn't a realistic
+  scenario here.
 - **LLM-generated note content → disk:** `NotesService` writes the LLM's markdown output to disk
   without sanitizing it first. This is acceptable because the output is plain text saved to a `.md`
   file, never executed, never interpolated into a shell command, and never served back as HTML — the

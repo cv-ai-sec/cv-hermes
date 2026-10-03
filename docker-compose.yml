@@ -36,6 +36,35 @@ services:
     # from reaching the internet at all — see scripts/00_setup_rocky9_host.sh and README.md
     # ("Network isolation" section) for why that split exists and what it does/doesn't cover.
 
+  task-dashboard:
+    build: ./task_dashboard
+    container_name: hermes-task-dashboard
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      TASK_DB_PATH: /app/data/tasks.db
+    volumes:
+      # Same ./data bind mount as hermes-agent — both containers open tasks.db
+      # concurrently; see task_dashboard/db.py and hermes_agent/services/task_db.py
+      # for the WAL-mode tradeoff that makes that safe.
+      - ./data:/app/data:Z
+    ports:
+      # Same posture as Grafana below: bound to all interfaces at the Docker level,
+      # firewalld on the VM restricts actual reachability to LOCAL_SUBNET only. No auth
+      # of its own — do not expose this port beyond the local subnet. See docs/INSTALL.md.
+      - "${TASK_DASHBOARD_PORT:-8502}:8000"
+    networks:
+      - obs-net
+    # No outbound internet needed — this service only reads/writes the local
+    # SQLite file, so it sits on obs-net (firewalld-blocked from the internet)
+    # rather than agent-net, same reasoning as Loki/Promtail/Grafana below.
+
   loki:
     image: grafana/loki:3.1.1
     container_name: hermes-loki
