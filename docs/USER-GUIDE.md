@@ -71,12 +71,29 @@ the "Browse notes/" link on the viewer page itself)
    ```bash
    docker compose up -d
    ```
-4. Verify everything actually started clean, not crash-looping:
+4. Verify all five containers actually started clean, not crash-looping:
    ```bash
    docker compose ps
    ```
-   Every service should show `Up`/`running` — not `Restarting`. If `hermes-agent` is restarting,
-   check `docker compose logs hermes-agent --tail 30` before assuming the rest of the stack is fine.
+   You should see `hermes-agent`, `loki`, `promtail`, `grafana`, and `task-dashboard`, all showing
+   `Up`/`running` — not `Restarting`. If `hermes-agent` is restarting, check
+   `docker compose logs hermes-agent --tail 30` before assuming the rest of the stack is fine (it's
+   the one container doing the most at startup: Discord gateway connection, loading `config/soul.md`,
+   and starting the embedded web chat server all happen here).
+5. Confirm each surface is actually reachable, not just "container says Up" — from Windows, using the
+   VM's host-only IP (see above):
+   - **Grafana** (`:3000`, or your `GRAFANA_PORT`): log in, open **Hermes Agent Overview**, and check
+     the **Hermes health** row — `LLM backend reachable` should read `UP` within one
+     `HEALTH_INTERVAL_SECONDS` interval (default 300s) of startup. If it's still blank after that,
+     the heartbeat loop hasn't run yet or `hermes-agent` is unhealthy — see "Checking Hermes's
+     health" below.
+   - **Local web chat** (`:8503`, or your `WEB_CHAT_PORT`): page loads, status line reads
+     "connected", and a plain message gets a reply.
+   - **Task dashboard** (`:8502`, or your `TASK_DASHBOARD_PORT`): page loads and shows existing
+     tasks (or an empty board on a fresh install) — confirms it can read `./data/tasks.db`.
+   - **Discord**: send `!hermes <anything>` in the server you invited the bot to and confirm a reply
+     — confirms the Discord gateway connection actually came up, which `docker compose ps` alone
+     doesn't tell you (a container can show `Up` while still failing to log in to Discord).
 
 ## Graceful shutdown
 
