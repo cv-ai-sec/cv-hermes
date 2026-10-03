@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>cv-hermes — Sandboxed Discord/Revolt Agent</title>
-<meta name="description" content="A sandboxed, containerized Discord/Revolt agent with full local observability — concept overview.">
+<title>cv-hermes — Sandboxed Cybersecurity Agent</title>
+<meta name="description" content="A sandboxed agent for cybersecurity work and network awareness — chat via Discord or a local web UI, track tasks on a dashboard, watch its own health in Grafana. Concept overview.">
 <style>
   :root {
     --bg: #0d1117;
@@ -201,6 +201,37 @@
     font-size: 0.85rem;
   }
 
+  /* Mock task board */
+  .board {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+  }
+  @media (max-width: 760px) { .board { grid-template-columns: 1fr; } }
+  .board-col {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px;
+  }
+  .board-col h5 {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+    margin: 4px 6px 10px;
+  }
+  .board-card {
+    background: var(--bg-panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 8px;
+    font-size: 0.82rem;
+  }
+  .board-card .bc-title { font-weight: 600; margin-bottom: 4px; }
+  .board-card .bc-meta { font-size: 0.7rem; color: var(--text-dim); }
+
   code.inline {
     background: var(--bg-panel-2);
     border: 1px solid var(--border);
@@ -216,13 +247,14 @@
   <div class="wrap">
     <h1>cv-hermes</h1>
     <p class="tagline">
-      A sandboxed, containerized Discord &amp; Revolt agent with full local observability —
-      running entirely inside an isolated VM, with network reach scoped to exactly what it needs.
+      A sandboxed agent for cybersecurity work and network awareness — not a chatbot that happens to
+      live in Discord. Chat with it via Discord or a local web UI, track its work on a task
+      dashboard, and watch its own health in Grafana — all running entirely inside an isolated VM.
     </p>
     <div class="badges">
       <span class="badge">Python</span>
       <span class="badge">discord.py</span>
-      <span class="badge">revolt.py</span>
+      <span class="badge">FastAPI + WebSocket</span>
       <span class="badge">OpenAI-compatible LLM</span>
       <span class="badge">Docker Compose</span>
       <span class="badge">Grafana</span>
@@ -243,14 +275,18 @@
     <h2>Architecture</h2>
     <p class="lede">
       Two Docker networks, split by what actually needs internet access. The agent talks to
-      Discord/Revolt, an LLM, and YouTube (for transcript fetching) — the observability stack
-      talks to nothing outside itself.
+      Discord, a browser-based web chat, an LLM, and YouTube (for transcript fetching) — the
+      observability stack and the task dashboard talk to nothing outside the local subnet.
     </p>
     <div class="arch">
       <div class="arch-row">
         <div class="arch-box">
-          <h4>Discord / Revolt Gateway</h4>
+          <h4>Discord Gateway</h4>
           <p>Inbound chat messages and commands</p>
+        </div>
+        <div class="arch-box">
+          <h4>Local web chat (browser)</h4>
+          <p>Same commands as Discord, no Discord account needed — firewalled to the local subnet</p>
         </div>
         <div class="arch-box">
           <h4>LM Studio (local LLM)</h4>
@@ -266,15 +302,20 @@
         <div class="arch-box agent-net">
           <span class="net-label agent-net">agent-net</span>
           <h4>Hermes Agent</h4>
-          <p>The only container with outbound internet. Sandboxed file tools, task DB, note generator.</p>
+          <p>The only container with outbound internet. Sandboxed file tools, task DB, note generator, soul.md persona, health heartbeat.</p>
         </div>
       </div>
-      <div class="arrow">↓ JSON logs</div>
+      <div class="arrow">↓ task reads/writes · JSON logs</div>
       <div class="arch-row">
         <div class="arch-box obs-net">
           <span class="net-label obs-net">obs-net — no internet, firewall-blocked</span>
+          <h4>Task Dashboard</h4>
+          <p>Browser view/add/edit of the same SQLite task DB — no chat command required.</p>
+        </div>
+        <div class="arch-box obs-net">
+          <span class="net-label obs-net">obs-net — no internet, firewall-blocked</span>
           <h4>Promtail → Loki → Grafana</h4>
-          <p>Structured logs shipped, stored, and visualized. Dashboard reachable only from the local subnet.</p>
+          <p>Structured logs (incl. Hermes health) shipped, stored, and visualized. Reachable only from the local subnet.</p>
         </div>
       </div>
     </div>
@@ -329,12 +370,35 @@
             <div style="height:15%;background:var(--accent-3)"></div>
           </div>
         </div>
+        <div class="panel">
+          <h5>LLM backend reachable</h5>
+          <div class="stat-value good">UP</div>
+        </div>
+        <div class="panel">
+          <h5>soul.md loaded</h5>
+          <div class="stat-value good">LOADED</div>
+        </div>
+        <div class="panel">
+          <h5>Context window usage (p95)</h5>
+          <div class="stat-value">34%</div>
+          <div class="bars">
+            <div style="height:20%;background:var(--accent-2)"></div><div style="height:28%;background:var(--accent-2)"></div>
+            <div style="height:34%;background:var(--accent-2)"></div><div style="height:22%;background:var(--accent-2)"></div>
+            <div style="height:30%;background:var(--accent-2)"></div>
+          </div>
+        </div>
+        <div class="panel">
+          <h5>Active adapters</h5>
+          <div class="stat-value" style="font-size:1.2rem;">discord, web</div>
+        </div>
         <div class="panel" style="grid-column: 1 / -1;">
           <h5>Live log stream</h5>
           <div class="logline">2026-10-02T14:02:11Z <span class="lvl-info">INFO</span> event=startup message="logged in as hermes#0841"</div>
+          <div class="logline">2026-10-02T14:02:12Z <span class="lvl-info">INFO</span> event=soul_loaded soul_loaded=1 message="soul.md loaded from /app/config/soul.md"</div>
           <div class="logline">2026-10-02T14:03:47Z <span class="lvl-info">INFO</span> event=task_status_change task_id=12 task_status=In Progress</div>
           <div class="logline">2026-10-02T14:04:02Z <span class="lvl-info">INFO</span> event=note_generated task_id=12 word_count=612 latency_ms=14300</div>
           <div class="logline">2026-10-02T14:07:19Z <span class="lvl-err">ERROR</span> event=error error_type=llm_api_error message="timeout contacting LLM backend"</div>
+          <div class="logline">2026-10-02T14:07:19Z <span class="lvl-info">INFO</span> event=health_heartbeat llm_reachable=1 uptime_seconds=18420 adapters_active=discord,web</div>
         </div>
       </div>
     </div>
@@ -343,10 +407,12 @@
 
 <section id="chat">
   <div class="wrap">
-    <h2>Chat concept — Discord &amp; Revolt</h2>
+    <h2>Chat concept — Discord &amp; local web chat</h2>
     <p class="lede">
-      Same command router, same behavior, two chat platforms — illustrative conversation, not a
-      live session.
+      Same command router, same behavior, two interfaces — no Discord account needed for the web
+      chat. Illustrative conversation, not a live session.
+      (Revolt support is scaffolded in the codebase but not currently functional — see the repo's
+      <code class="inline">docs/ARCHITECTURE.md</code> for why.)
     </p>
     <div class="chat-mocks">
       <div class="chat-mock">
@@ -358,12 +424,57 @@
         </div>
       </div>
       <div class="chat-mock">
-        <div class="chat-mock-header revolt">💬 Revolt</div>
+        <div class="chat-mock-header" style="background: var(--accent);">🌐 Local web chat</div>
         <div class="chat-body">
-          <div class="msg user"><div class="meta">you</div>!hermes task Research LM Studio quantization options</div>
+          <div class="msg user"><div class="meta">you</div>task Research LM Studio quantization options</div>
           <div class="msg bot"><div class="meta">Hermes</div>[Task Created] Task ID #13: "Research LM Studio quantization options" (status: Backlog)</div>
-          <div class="msg user"><div class="meta">you</div>@Hermes what's the capital of Japan?</div>
+          <div class="msg user"><div class="meta">you</div>what's the capital of Japan?</div>
           <div class="msg bot"><div class="meta">Hermes</div>Tokyo.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="task-dashboard">
+  <div class="wrap">
+    <h2>Task dashboard — concept preview</h2>
+    <p class="lede">
+      Add, view, and organize tasks from a browser — same SQLite DB the <code class="inline">task</code>/
+      <code class="inline">summarize</code> commands write to, no chat command required. Illustrative,
+      not live data.
+    </p>
+    <div class="board">
+      <div class="board-col">
+        <h5>Backlog</h5>
+        <div class="board-card">
+          <div class="bc-title">#14 Review CVE feed for exposed services</div>
+          <div class="bc-meta">source: dashboard</div>
+        </div>
+        <div class="board-card">
+          <div class="bc-title">#15 Document VM network diagram</div>
+          <div class="bc-meta">source: web</div>
+        </div>
+      </div>
+      <div class="board-col">
+        <h5>In Progress</h5>
+        <div class="board-card">
+          <div class="bc-title">#12 Summarize: youtu.be/example</div>
+          <div class="bc-meta">source: discord</div>
+        </div>
+      </div>
+      <div class="board-col">
+        <h5>Completed</h5>
+        <div class="board-card">
+          <div class="bc-title">#13 Research LM Studio quantization options</div>
+          <div class="bc-meta">source: web · note saved</div>
+        </div>
+      </div>
+      <div class="board-col">
+        <h5>Failed</h5>
+        <div class="board-card">
+          <div class="bc-title">#11 Summarize: private-video-link</div>
+          <div class="bc-meta">source: discord · no captions available</div>
         </div>
       </div>
     </div>
@@ -398,6 +509,14 @@
       <div class="feature">
         <h4>🗃️ Local-only task tracking</h4>
         <p>A simple SQLite task DB, not a real external integration — no extra credentials or attack surface for something that doesn't need one yet.</p>
+      </div>
+      <div class="feature">
+        <h4>🩺 Own health, not just hidden assumptions</h4>
+        <p>LLM reachability, persona (soul.md) load status, and estimated context-window usage are tracked and visible in Grafana — a silently-reverted-to-default persona shows up on a dashboard, not just in logs.</p>
+      </div>
+      <div class="feature">
+        <h4>🌐 No new attack surface from the extra UIs</h4>
+        <p>The task dashboard and local web chat are unauthenticated by design, same as Grafana — both rely entirely on firewalld restricting their ports to the local subnet, documented as the actual access control.</p>
       </div>
     </div>
   </div>
