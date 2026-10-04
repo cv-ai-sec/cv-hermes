@@ -46,7 +46,9 @@ services:
       HTTP_PROXY: http://${EGRESS_PROXY_IP:?set EGRESS_PROXY_IP in .env}:3128
       HTTPS_PROXY: http://${EGRESS_PROXY_IP:?set EGRESS_PROXY_IP in .env}:3128
       DISCORD_PROXY: http://${EGRESS_PROXY_IP:?set EGRESS_PROXY_IP in .env}:3128
-      NO_PROXY: "host.docker.internal,localhost,127.0.0.1"
+      # LM Studio goes direct, not through the egress proxy. The proxy only tunnels Discord hosts,
+      # and firewalld allows agent-net to reach only the proxy and tcp/1234 on the Windows host.
+      NO_PROXY: "host.docker.internal,localhost,127.0.0.1,${HOST_LM_STUDIO_IP:?set HOST_LM_STUDIO_IP in .env}"
     volumes:
       # Everything the official image keeps: .env, config.yaml, sessions, memories, skills,
       # logs. Git-ignored (see .gitignore); holds the Discord token and dashboard password.
