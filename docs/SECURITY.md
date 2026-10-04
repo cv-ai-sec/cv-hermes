@@ -1,78 +1,65 @@
 # Security & Secret Hygiene
 
-This project is designed to be safe to publish publicly on GitHub — the code and configuration,
-that is, not the live bot itself (your `.env` holds a real Discord token and LLM API key, and never
-leaves your machine). That safety comes from process, not luck — follow this checklist every time,
-not just on the first commit.
+This repo is safe to publish: it contains code and configuration, never the live bot, its tokens, or
+the VM's addresses. Those live only in local, git-ignored `.env` files. Follow the checklist below before
+every commit.
 
 ## Design constraints
 
-- **Partially air-gapped, by explicit exception.** Unlike a fully air-gapped lab, Hermes Agent's
-  entire purpose requires reaching the internet (the Discord Gateway, and an LLM API). Rather than
-  blocking everything, the Docker network is split in two: `agent-net` (hermes-agent only, egress
-  left open) and `obs-net` (Loki/Promtail/Grafana, which have no legitimate reason to reach the
-  internet). `obs-net`'s egress is blocked at the host firewall (`firewalld`, see
-  `docs/INSTALL.md`), not via Docker's own `internal: true` flag — that flag also silently disables
-  the iptables chain `docker-proxy` needs to publish Grafana's port, so it's incompatible with this
-  project's requirement to expose Grafana to `LOCAL_SUBNET`. See `docs/ARCHITECTURE.md`'s Trust
-  boundaries section for the full reasoning.
-- **Secrets never flow through config files.** `hermes_agent/config.py` reads `DISCORD_TOKEN` and
-  `LLM_API_KEY` from the environment only — the YAML config path (`hermes.example.yaml`/
-  `hermes.yaml`) is never consulted for either. A leaked or accidentally-committed config file
-  cannot leak a credential.
-- **Sandboxed file tools.** `hermes_agent/tools.py` resolves and verifies every path the LLM asks to
-  read/write against `./workspace` before touching disk, rejecting anything that would escape it —
-  the one place a prompt-injected response could attempt a path traversal.
-- **Task DB is deliberately not a real external integration.** `hermes_agent/services/task_db.py` is
-  a local SQLite table, not an AppFlowy/Affine connection — no API credentials, no network calls, no
-  dependency on either app actually running. See `docs/ARCHITECTURE.md`'s Trust boundaries section
-  for the `summarize` command's URL-fetching and LLM-output-to-disk risk reasoning too.
-- **Every container hardened.** `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`,
-  `read_only: true` root filesystem, non-root user, SELinux `:Z` volume labels — on every service in
-  `docker-compose.yml`, not just hermes-agent.
-- **Task dashboard and local web chat have no authentication of their own**, same as Grafana — both
-  rely entirely on firewalld restricting their published ports (`TASK_DASHBOARD_PORT`,
-  `WEB_CHAT_PORT`) to `LOCAL_SUBNET`. Acceptable for a single-user home lab only; see
-  `docs/ARCHITECTURE.md`'s Trust boundaries section before widening either firewalld rule.
-- **`config/soul.md` is plain-text persona config, not a secret.** It's committed to the repo
-  intentionally (unlike `.env`) — never put credentials, internal IPs, or anything sensitive in it,
-  since it ships with the code, not with `.env`.
+- **Not air-gapped; egress is restricted.** The agent has exactly two internet hosts, `discord.com` and
+  `gateway.discord.gg`, reached only through an egress proxy. Layers:
+  - **Egress proxy** (Squid): tunnels only to the allowlisted hostnames on 443. No TLS interception, so it
+    checks hostnames, not paths.
+  - **Host firewall:** `DOCKER-USER` rules, applied at boot, reject all other outbound traffic from the agent
+    network. The proxy's own outbound is limited to 443 and DNS.
+  - **Observability:** Loki, Promtail, and Grafana have no internet route.
+- **Local models only, for now.** The LLM is LM Studio on the Windows host, on `tcp/1234`. No cloud LLM
+  provider is permitted. Adding one requires a new audit-log entry and a change here.
+  The agent wizard must be run in **Full setup** mode, not Quick Setup (which signs in to the Nous Portal).
+  After setup, check `hermes-data/config.yaml` for cloud-provider entries.
+- **Dashboard and API require credentials.** The dashboard (`9119`) requires basic auth; the API (`8642`)
+  requires `API_SERVER_KEY`. Both bind to the VM's host-only address, and the firewall restricts them to the
+  lab subnet. Grafana has its own login.
+- **Secrets stay out of files that ship.** The Discord token, dashboard password, and API key live only in
+  `hermes-data/.env`. The compose `.env` holds addresses and ports only.
 
-## Pre-commit checklist (run this before every `git add`, not just the first one)
+## Accepted risks
 
-1. **Diff review, not just `git add -A`.** Run `git status` and `git diff --cached` and actually
-   read what's staged before committing. Don't blind-stage a whole directory.
-2. **Grep staged files for secret patterns:**
+Each of these is a known tradeoff, recorded here and in the cv-hermes audit log.
+
+1. **Discord over 443 can carry malicious payloads or data out.** The proxy checks hostnames only, so
+   content and paths on those two hosts are not inspected.
+2. **The agent's terminal runs locally, without a sandbox.** The agent is configured with
+   `terminal.backend: local`, so its commands run inside its container with no extra isolation. The API
+   listens on `0.0.0.0` inside the container, and the host firewall limits who can reach it to the lab subnet.
+   Prompt injection through Discord or the API could reach this. Mitigations: `DISCORD_ALLOWED_USERS` limits who
+   can talk to the bot, and the API key limits who can call the API.
+3. **DNS is not restricted to specific resolvers.** The agent's container can resolve names through Docker's
+   resolver; the firewall blocks connections, not lookups. DNS tunneling is not blocked.
+4. **LM Studio is reached directly.** The agent's model traffic bypasses the proxy and goes straight to the
+   Windows host on `tcp/1234`. This is local-only, but it is a path from the agent to the host.
+5. **Promtail runs as the agent's UID** to read the agent's logs, which may contain chat content. It has no
+   internet route.
+6. **Single-user VM.** The admin account has read access to `hermes-data/`, including `.env`, via an ACL.
+
+## Pre-commit checklist
+
+1. **Review the diff.** Run `git status` and `git diff --cached`, and read what's staged. Don't blind-stage a
+   directory.
+2. **Scan staged files for secret patterns:**
    ```
    git diff --cached | grep -iE "(api[_-]?key|apikey|secret|password|token|sk-[a-zA-Z0-9]|AIza|BEGIN (RSA|OPENSSH|EC) PRIVATE KEY)"
    ```
-   Any hit needs manual review — is it a real value, or an intentional placeholder like
-   `.env.example`'s `your_token_here`?
-3. **No real `.env`.** Confirm `.env` never appears in `git status` as a tracked or staged file —
-   `.gitignore` excludes it, but a forced `git add -f .env` would bypass that. Only `.env.example`
-   with dummy values should ever be committed.
-4. **No hardcoded local paths, usernames, or server IPs.** Scan for your actual Windows username,
-   absolute local paths (`C:\Users\<name>\...`, `D:\Ai projects\...`), real VM/LAN IP addresses, or
-   hostnames leaking into config files, comments, or log fixtures. Use relative paths and env vars
-   instead.
-5. **No real log or runtime artifacts.** `workspace/`, `notes/`, `data/`, `hermes-logs`/
-   `loki-data`/`grafana-data` volumes, and `*.log`/`*.jsonl` files are git-ignored — verify none were
-   force-added, and that any example log line or generated note checked into a doc is synthetic, not
-   pulled from a real run.
-6. **New dependencies are permissively licensed.** Check the license of anything added to
-   `hermes_agent/requirements.txt` or `task_dashboard/requirements.txt` before adding it (discord.py
-   and aiohttp are Apache-2.0, yt-dlp is Unlicense/public-domain, fastapi and uvicorn are MIT — keep
-   new additions MIT/Apache-2.0/BSD-equivalent). `revolt.py` is deliberately NOT installed (dependency
-   conflict with `openai` — see `requirements.txt`); if it's ever re-added, verify its actual license
-   on whatever version installs, not assumed.
-7. **soul.md stays generic.** If `config/soul.md` was edited this session, confirm nothing specific
-   to your real network (hostnames, real IP ranges, internal service names) was written into it —
-   it's committed to the repo, unlike `.env`.
+   Any hit needs review: real value, or an intentional placeholder like `your_token_here`?
+3. **No real `.env` files.** `.env` and `hermes-data/` must never appear in `git status`. Only the
+   `.example` files are committed.
+4. **No private addresses or local paths.** Scan for private IP ranges, `C:\Users\`, `D:\`, and usernames.
+   Use placeholders such as `<VM host-only IP>` in docs.
+5. **No runtime artifacts.** `hermes-data/`, named volumes, and `*.log` files are git-ignored.
+6. **Keep audit details out of the repo.** Audit logs live under `Projects\` outside this repo and are never committed.
 
 ## If you find something real
 
-Stop. Do not commit, do not push, and do not just delete the line and continue silently — flag it
-so the exposure (if already committed locally) can be handled properly. A secret that was only ever
-staged/committed locally and never pushed is easy to fix (amend or drop the commit). A secret that
-reached a remote needs to be treated as compromised: rotate it (regenerate the Discord bot token /
-LLM API key), then clean history.
+Stop. Don't commit, push, or delete-and-continue silently. A secret that's only committed locally is easy to
+fix (drop the commit). A secret that reached a remote must be treated as compromised: rotate it first
+(regenerate the Discord token, change the dashboard password, regenerate the API key), then clean history.

@@ -1,0 +1,17 @@
+# Template. Install on the VM as /etc/systemd/system/hermes-egress.service, replacing <REPO_DIR>
+# with the absolute path to the cv-hermes checkout (for example /home/<user>/cv-hermes).
+# Values come from /etc/hermes-egress.env (root-only, never committed).
+
+[Unit]
+Description=Hermes agent egress rules in the DOCKER-USER chain
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/hermes-egress.env
+ExecStart=<REPO_DIR>/scripts/02_apply_docker_user_rules.sh
+
+[Install]
+WantedBy=multi-user.target

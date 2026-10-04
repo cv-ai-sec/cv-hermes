@@ -1,0 +1,2 @@
+discord.com
+gateway.discord.gg
