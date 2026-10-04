@@ -17,7 +17,8 @@ notes/*
 !notes/.gitkeep
 
 # --- Hermes runtime state: .env, sessions, memories, skills (holds the Discord token) ---
-hermes-data/
+hermes-data/*
+!hermes-data/.env.example
 
 # --- Loki / Grafana runtime state (bind-mounted volumes) ---
 loki-data/
