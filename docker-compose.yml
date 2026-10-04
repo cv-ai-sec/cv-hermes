@@ -93,9 +93,12 @@ services:
     security_opt:
       - no-new-privileges:true
     command: -config.file=/etc/promtail/config.yaml
+    # Runs as the agent's UID (10000) so it can read the agent's logs, which the agent writes
+    # as that user. Grants this container read access to the logs folder only, mounted read-only.
+    user: "10000:10000"
     volumes:
       - ./config/promtail-config.yaml:/etc/promtail/config.yaml:ro,Z
-      - ./hermes-data:/var/log/hermes:ro,Z
+      - ./hermes-data/logs:/var/log/hermes/logs:ro,Z
       - promtail-positions:/tmp/positions:Z
     networks:
       - obs-net
