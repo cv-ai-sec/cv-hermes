@@ -7,6 +7,10 @@ services:
     image: ${EGRESS_PROXY_IMAGE:?set EGRESS_PROXY_IMAGE in .env (see docs/INSTALL.md)}
     container_name: hermes-egress-proxy
     restart: unless-stopped
+    # The image's entrypoint runs `squid "$@"`. Without these flags Squid forks to the background,
+    # the container's main process exits, and Docker restarts it in a loop. -N keeps Squid in the
+    # foreground, -Y and -C match the image's default, and -d 1 sets log verbosity.
+    command: ["-NYCd", "1"]
     read_only: true
     tmpfs:
       - /var/run/squid
