@@ -7,15 +7,26 @@ not just on the first commit.
 
 ## Design constraints
 
-- **Partially air-gapped, by explicit exception.** Unlike a fully air-gapped lab, Hermes Agent's
-  entire purpose requires reaching the internet (the Discord Gateway, and an LLM API). Rather than
-  blocking everything, the Docker network is split in two: `agent-net` (hermes-agent only, egress
-  left open) and `obs-net` (Loki/Promtail/Grafana, which have no legitimate reason to reach the
-  internet). `obs-net`'s egress is blocked at the host firewall (`firewalld`, see
-  `docs/INSTALL.md`), not via Docker's own `internal: true` flag — that flag also silently disables
-  the iptables chain `docker-proxy` needs to publish Grafana's port, so it's incompatible with this
-  project's requirement to expose Grafana to `LOCAL_SUBNET`. See `docs/ARCHITECTURE.md`'s Trust
-  boundaries section for the full reasoning.
+- **Local models only, for now.** The LLM is LM Studio on the Windows host, reached over the
+  host-only network (`tcp/1234`). No cloud LLM provider (OpenAI, Anthropic, and similar) is
+  permitted. Adding one requires a new audit-log entry, a change to the egress allowlist, and an
+  update to this section.
+- **Not air-gapped. Network-restricted.** The VM is not an air-gapped environment. The hermes-agent
+  needs two internet hosts (`discord.com` and `gateway.discord.gg`), and the VM keeps a NAT adapter
+  for installs. Restrictions apply in layers:
+  - **Egress proxy.** hermes-agent's only route out is a Squid proxy (`config/egress-proxy/`),
+    which tunnels only to the hostnames in `allowed-domains.txt`. It doesn't inspect TLS, so it
+    checks hostnames, not paths.
+  - **Host firewall.** `scripts/01_apply_hermes_egress_policy.sh` rejects every other outbound
+    connection from the agent network, and allows the proxy only tcp/443 and DNS.
+  - **Observability network.** `obs-net` (Loki/Promtail/Grafana) is blocked from the internet
+    entirely, by `scripts/00_setup_rocky9_host.sh`.
+  - **Accepted risks** (recorded in the cv-hermes audit log): HTTPS to the two allowed hosts can
+    carry malicious payloads or data out; DNS resolution isn't restricted to specific resolvers;
+    the proxy allows any path on the allowed hostnames. The agent also reaches LM Studio on the
+    Windows host (`tcp/1234`), a local-only path.
+  Docker's `internal: true` is not used, since it breaks published ports. See
+  `docs/ARCHITECTURE.md`'s Trust boundaries section.
 - **Secrets never flow through config files.** `hermes_agent/config.py` reads `DISCORD_TOKEN` and
   `LLM_API_KEY` from the environment only — the YAML config path (`hermes.example.yaml`/
   `hermes.yaml`) is never consulted for either. A leaked or accidentally-committed config file
@@ -30,10 +41,10 @@ not just on the first commit.
 - **Every container hardened.** `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`,
   `read_only: true` root filesystem, non-root user, SELinux `:Z` volume labels — on every service in
   `docker-compose.yml`, not just hermes-agent.
-- **Task dashboard and local web chat have no authentication of their own**, same as Grafana — both
-  rely entirely on firewalld restricting their published ports (`TASK_DASHBOARD_PORT`,
-  `WEB_CHAT_PORT`) to `LOCAL_SUBNET`. Acceptable for a single-user home lab only; see
-  `docs/ARCHITECTURE.md`'s Trust boundaries section before widening either firewalld rule.
+- **The Hermes dashboard requires login; the API uses a key.** The dashboard (`9119`) requires
+  `HERMES_DASHBOARD_BASIC_AUTH_*` credentials on any non-loopback bind, and the API (`8642`)
+  requires `API_SERVER_KEY`. Both bind to `HERMES_BIND_IP` (the VM's host-only address), and
+  firewalld restricts them to `LOCAL_SUBNET`. Grafana has its own login.
 - **`config/soul.md` is plain-text persona config, not a secret.** It's committed to the repo
   intentionally (unlike `.env`) — never put credentials, internal IPs, or anything sensitive in it,
   since it ships with the code, not with `.env`.
@@ -60,7 +71,7 @@ not just on the first commit.
    force-added, and that any example log line or generated note checked into a doc is synthetic, not
    pulled from a real run.
 6. **New dependencies are permissively licensed.** Check the license of anything added to
-   `hermes_agent/requirements.txt` or `task_dashboard/requirements.txt` before adding it (discord.py
+   `hermes_agent/requirements.txt` or `hermes-gui/requirements.txt` before adding it (discord.py
    and aiohttp are Apache-2.0, yt-dlp is Unlicense/public-domain, fastapi and uvicorn are MIT — keep
    new additions MIT/Apache-2.0/BSD-equivalent). `revolt.py` is deliberately NOT installed (dependency
    conflict with `openai` — see `requirements.txt`); if it's ever re-added, verify its actual license

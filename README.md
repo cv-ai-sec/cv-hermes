@@ -1,11 +1,19 @@
 # cv-hermes
 
-A sandboxed agent (Hermes) meant for cybersecurity work and building awareness of its own lab
-network — not a chatbot that happens to answer cybersecurity questions. Discord and a local web UI
-are both just interfaces to the same agent; work gets tracked as tasks on a browser dashboard; and
-Hermes's own health (LLM reachability, persona status, context-window usage) plus token usage,
-latency, and errors are all visible in Grafana, without any of that data leaving the VM except
-Hermes's own traffic to Discord, YouTube (for transcript fetching), and your chosen LLM API.
+A cybersecurity learning environment built on the existing **Hermes Agent** by Nous Research,
+repurposed for learning the **OWASP Top 10 for LLM Applications** and for detecting rogue entities on
+its own lab network. It runs in a controlled VM and Docker stack. This project does not reimplement
+Hermes. It runs the official agent image, configures it with the recommended settings, and adds the
+lab-specific pieces: a restricted network, a persona and scope for security learning
+(`config/soul.md`), and Grafana for observing the agent's own health.
+
+- Hermes Agent (official project): **[hermes-agent.nousresearch.com](https://hermes-agent.nousresearch.com/)**
+- Hermes quickstart (what the official image and gateway expect): **[quickstart](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart)**
+
+Discord and the dashboard are interfaces to the same agent. The only internet access is
+`discord.com` and `gateway.discord.gg`, through an egress proxy; the LLM is local (LM Studio on
+the host). See [docs/SECURITY.md](docs/SECURITY.md) for the exact network posture and accepted
+risks.
 
 **[→ Live concept preview](https://cv-ai-sec.github.io/cv-hermes/)** — a static page showing the
 architecture, a mock Grafana dashboard, and a mock Discord/Revolt conversation, viewable without
@@ -17,52 +25,71 @@ Already running and just need a URL or a command? See [docs/USER-GUIDE.md](docs/
 
 ## Mission
 
-Hermes's purpose is to help investigate and understand its own network and systems, and to do
-cybersecurity-adjacent work — not to be a general-purpose chatbot. Its persona and scope live in
-[config/soul.md](config/soul.md), editable without touching code. Everything it does is tracked as a
-task rather than lost in chat scrollback, every capability it has is sandboxed and explicitly
-allowlisted, and every metric about what it's actually doing — cost, latency, errors, its own
-health — is visible on a local dashboard, not buried in stdout.
+The lab focuses on the **OWASP Top 10 for LLM Applications** (2025):
 
-**Current state, honestly:** the concrete tools Hermes has today are a sandboxed workspace
-(read/write/list files in `./workspace`) and the `summarize`/`task` pipeline — not yet any
-network-scanning or log-analysis tooling of its own. Cybersecurity-specific tools are the direction
-this project is heading, added deliberately one at a time behind the same explicit allowlist
-(`tools.allowed` in `config/hermes.example.yaml`) rather than given broad reach upfront. See
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)'s Trust boundaries section for why that allowlist model
-matters more here than in a typical chatbot.
+| ID | Risk |
+|---|---|
+| LLM01 | Prompt Injection (direct and indirect) |
+| LLM02 | Sensitive Information Disclosure |
+| LLM03 | Supply Chain Vulnerabilities |
+| LLM04 | Data and Model Poisoning |
+| LLM05 | Improper Output Handling |
+| LLM06 | Excessive Agency |
+| LLM07 | System Prompt Leakage |
+| LLM08 | Vector and Embedding Weaknesses |
+| LLM09 | Misinformation / Overreliance |
+| LLM10 | Unbounded Consumption |
+
+The classic web OWASP Top 10 is out of scope for this project.
+
+**Detection goal:** the agent should help detect rogue entities on the lab network: unauthorized
+MCP servers, rogue or unknown agents, and unexpected services on the VM's network. Nothing in this
+repo implements that yet. It needs network visibility the agent doesn't have today, which is a
+deliberate firewall change to be decided and recorded separately before it's built.
+
+The lab is for learning on systems you own, inside a controlled VM and Docker environment. The agent's persona and scope live in
+[config/soul.md](config/soul.md), editable without touching code.
+
+**Current state, honestly:** the agent runs on the official image, but this repo does not yet add
+OWASP LLM lab targets or tooling. Hermes's built-in capabilities are what the official image
+provides, and the lab's own additions will be introduced one at a time. Any tool the agent gets is
+explicitly allowlisted, not given broad reach upfront. See
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)'s Trust boundaries section for why that matters here.
 
 ## Why this is safe to publish
 
+- **Local models only.** The LLM is LM Studio on the Windows host. No cloud LLM provider is allowed
+  for now (see docs/SECURITY.md).
 - **Secrets never touch a file.** `hermes_agent/config.py` reads `DISCORD_TOKEN`/`LLM_API_KEY` from
   the environment only, never from the YAML config — `.env` is git-ignored, only `.env.example`
   with placeholders is committed. See [docs/SECURITY.md](docs/SECURITY.md).
-- **Partially air-gapped, by documented exception.** Only the `hermes-agent` container can reach
-  the internet (Discord, the configured LLM API, and YouTube for transcript fetching);
-  Loki/Promtail/Grafana/task-dashboard are firewalld-blocked from all outbound traffic, since none
-  of them need it. Full reasoning in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+- **Not air-gapped; egress is restricted.** hermes-agent reaches the internet only through an
+  egress proxy that allows `discord.com` and `gateway.discord.gg`. Loki, Promtail, and Grafana
+  have no internet access. The LLM is local (LM Studio on the host). See
+  [docs/SECURITY.md](docs/SECURITY.md) for the layers and accepted risks.
 - **Every container hardened:** `cap_drop: [ALL]`, `no-new-privileges`, read-only root filesystem,
   non-root user, SELinux `:Z` volume labels — on every service, not just the agent.
 - **Sandboxed file tools.** The one tool category the LLM can call is path-contained to
   `./workspace` on every invocation, not just at startup — see
   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)'s Trust boundaries section.
-- **No new attack surface from the local web chat or task dashboard.** Both are unauthenticated by
-  design, like Grafana, and both rely entirely on firewalld restricting their ports to
-  `LOCAL_SUBNET` — see their entries in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)'s Trust
-  boundaries section before widening either rule.
+- **Hermes GUI has zero backend of its own.** It's a static file server with no database, no
+  secrets, and no network reach beyond serving the page — the browser talks to Hermes Core's API
+  directly. Neither that API nor the GUI itself has app-level auth; both rely entirely on firewalld
+  restricting their ports to `LOCAL_SUBNET` — see
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)'s Trust boundaries section before widening either
+  rule.
 - **Pre-commit security checklist:** see [docs/SECURITY.md](docs/SECURITY.md) — followed before
   every commit, not just the first one.
 
 ## Architecture
 
 ```
-Discord     \
-Web chat UI  -> Hermes Agent -> LLM API
-                        |      \
-                        |       -> yt-dlp -> Notes service -> ./notes/*.md
-                        |                          |
-                        |                     Task DB (SQLite) <-> Task Dashboard (browser)
-                   JSON logs (incl. health heartbeat) -> Promtail -> Loki <- Grafana
+Discord -> Hermes Core -> LLM API
+             ^  |      \
+   /api/*,  /ws  \       -> yt-dlp -> Notes service -> ./notes/*.md
+    |              \                         |
+Hermes GUI          Task DB (SQLite, owned solely by Hermes Core)
+ (browser)     JSON logs (incl. health heartbeat) -> Promtail -> Loki <- Grafana
 ```
 
 Full diagram, component table, and trust-boundary breakdown:
@@ -76,28 +103,35 @@ Full diagram, component table, and trust-boundary breakdown:
 | `!hermes summarize <youtube-url>` | Fetches the video's transcript (captions only, no audio transcription), generates a structured markdown note via the LLM, saves it to `./notes/`, and replies with a proof-of-work summary (word count, processing time) |
 | `!hermes task <title>` | Creates a tracked task entry (`Backlog` status) in the local SQLite task DB, no note generation |
 
-All three commands work identically from the **local web chat** (`http://<VM-IP>:<WEB_CHAT_PORT>`,
-default `8503`, no prefix needed — just type `summarize <url>` directly) as they do from Discord — no
+All three commands work identically from **Hermes GUI**'s Chat tab (`http://<VM-IP>:<HERMES_GUI_PORT>`,
+default `8504`, no prefix needed — just type `summarize <url>` directly) as they do from Discord — no
 Discord account, server, or token required to talk to Hermes at all. See
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)'s "Chat platform adapters" section.
 
-A task can also be created/viewed/edited from the browser-based **task dashboard**
-(`task_dashboard/`, `TASK_DASHBOARD_PORT` in `.env`, default `8502`) — same SQLite file, no chat
-command required. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)'s "Task dashboard" section for
-what it does and the one thing it deliberately doesn't do yet (auto-processing a task added there).
+A task can also be created/viewed/edited from Hermes GUI's **Tasks** tab — same SQLite file (via
+Hermes Core's `/api/tasks`), no chat command required. See
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)'s "Hermes GUI" section for what it does and the one
+thing it deliberately doesn't do yet (auto-processing a task added there).
 
-Discord and the local web chat are both fully supported. Revolt is scaffolded but not currently
+Discord and Hermes GUI's web chat are both fully supported. Revolt is scaffolded but not currently
 functional — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)'s "Chat platform adapters" section for
 why (`revolt.py`'s dependencies conflict with `openai`'s, not a design choice).
 
-## Hermes health
+## Hermes GUI & health
 
-Grafana's "Hermes health" panel row tracks things that used to be invisible: whether
-[config/soul.md](config/soul.md) actually loaded (vs. silently falling back to a generic default),
-whether the configured LLM backend is reachable, estimated context-window usage per chat call, and
-uptime/active-adapters. Full explanation: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)'s "Hermes
-health" section. Day-2 reference: [docs/USER-GUIDE.md](docs/USER-GUIDE.md)'s "Checking Hermes's
-health" section.
+**Hermes GUI** (`http://<VM-IP>:<HERMES_GUI_PORT>`, default `8504`) is the one dashboard for
+everything: Chat, Tasks, a real-time Health tab, and a labeled "coming soon" Reasoning Canvas
+placeholder (it needs an actual LLM tool-calling loop first — not built yet, see
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)). It's a pure static page with zero backend of its
+own — every chat message and task read/write goes straight from your browser to Hermes Core's API
+(`WEB_CHAT_PORT`).
+
+Grafana's "Hermes health" panel row tracks the same underlying signal as the GUI's Health tab, as a
+historical trend instead of a live snapshot: whether [config/soul.md](config/soul.md) actually
+loaded (vs. silently falling back to a generic default), whether the configured LLM backend is
+reachable, estimated context-window usage per chat call, and uptime/active-adapters. Full
+explanation: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)'s "Hermes health" section. Day-2
+reference: [docs/USER-GUIDE.md](docs/USER-GUIDE.md)'s "Checking Hermes's health" section.
 
 ## System specifications
 
@@ -123,12 +157,11 @@ health" section.
 ├── docs/             # ARCHITECTURE.md, INSTALL.md, SECURITY.md, USER-GUIDE.md
 ├── config/           # hermes.example.yaml, soul.md (Hermes's persona), loki/promtail/grafana provisioning
 ├── dashboards/       # hermes-overview.json — auto-provisioned Grafana dashboard, incl. Hermes health row
-├── hermes_agent/      # main.py, config.py, metrics.py, health.py, soul.py, tools.py, Dockerfile
-│   ├── adapters/      # ChatAdapter interface + Discord + web chat (Revolt scaffolded, not yet functional)
-│   │   └── web_static/ # index.html — the local web chat page
+├── hermes_agent/      # "Hermes Core" — main.py, config.py, metrics.py, health.py, soul.py, tools.py, Dockerfile
+│   ├── adapters/      # ChatAdapter interface + Discord + the core API/WS adapter (Revolt scaffolded, not yet functional)
 │   ├── bot/           # commands.py — the one place command logic lives, platform-agnostic
-│   └── services/      # transcript_service.py, task_db.py, notes_service.py
-├── task_dashboard/    # FastAPI task board (view/add/edit/delete), own Dockerfile, reads ./data/tasks.db
+│   └── services/      # transcript_service.py, task_db.py (sole owner of tasks.db), notes_service.py
+├── hermes-gui/        # Unified dashboard (Chat/Tasks/Health/Reasoning Canvas) — static-only, own Dockerfile, no DB access
 ├── scripts/          # 00_setup_rocky9_host.sh, parse_metrics.py, export_grafana_dashboards.sh, notes-viewer.html
 ├── workspace/        # sandboxed, isolated workspace for Hermes's chat file tools (git-ignored contents)
 ├── notes/            # generated markdown notes from the `summarize` command (git-ignored contents)
@@ -144,25 +177,25 @@ Quick version, once the VM is provisioned (`sudo bash scripts/00_setup_rocky9_ho
 run):
 
 ```bash
-cp .env.example .env   # fill in DISCORD_TOKEN, LLM_API_BASE/KEY/MODEL, GRAFANA_ADMIN_PASSWORD
+cp .env.example .env   # compose-level values: IPs, ports, image tags, GRAFANA_ADMIN_PASSWORD
+# hermes-data/.env: DISCORD_BOT_TOKEN, OPENAI_API_KEY (LM Studio placeholder), dashboard and API keys
 docker compose up -d
 # or: podman-compose up -d
 docker compose logs -f hermes-agent
 ```
 
-Then find the VM's host-only IP (`ip addr show | grep 192.168.56`) and open, from a machine on
+Then find the VM's host-only IP (`ip -4 addr show` on the VM) and open, from a machine on
 `LOCAL_SUBNET`:
 
-- `http://<that-ip>:<GRAFANA_PORT>` (default `3000`) — the **Hermes Agent Overview** dashboard,
-  auto-provisioned, including the "Hermes health" row.
-- `http://<that-ip>:<WEB_CHAT_PORT>` (default `8503`) — chat with Hermes without Discord.
-- `http://<that-ip>:<TASK_DASHBOARD_PORT>` (default `8502`) — view/add/edit tasks.
+- `http://<that-ip>:<HERMES_DASHBOARD_PORT>` (default `9119`): the official Hermes dashboard. Login required.
+- `http://<that-ip>:<GRAFANA_PORT>` (default `3000`): Grafana. The Hermes health panels need the
+  Promtail update noted in `docs/INSTALL.md` step 10 before they show data.
 
 ## Running alongside ai-cybersecurity-devops-lab
 
 This project runs in its **own dedicated VM** (named `hermes agent` in VirtualBox), not the same VM
 as [`ai-cybersecurity-devops-lab`](../ai-cybersecurity-devops-lab) — but both VMs share this
-workspace's VirtualBox host-only network (`192.168.56.0/24`) and can both reach the same LM Studio
+workspace's VirtualBox host-only network and can both reach the same LM Studio
 instance on the Windows host. Settings that had to be kept distinct between the two VMs:
 
 | Setting | cv-hermes (`hermes agent` VM) | ai-cybersecurity-devops-lab (`ai_cybersecurity` VM) |

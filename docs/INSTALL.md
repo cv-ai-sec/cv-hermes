@@ -1,5 +1,8 @@
 # Installation Guide (VirtualBox + Rocky Linux 9)
 
+Hermes Agent is the official project by Nous Research: [hermes-agent.nousresearch.com](https://hermes-agent.nousresearch.com/).
+For the agent's own setup concepts, see its [quickstart](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart).
+
 This guide runs the entire cv-hermes stack **inside a dedicated VirtualBox VM** running Rocky Linux
 9, using the same NAT + Host-only adapter pattern as this workspace's other lab
 ([`ai-cybersecurity-devops-lab`](../ai-cybersecurity-devops-lab)) — one adapter for internet access
@@ -25,10 +28,9 @@ exists — reuse it rather than creating a second one. Otherwise:
 
 1. **File → Tools → Network Manager** (or **Host Network Manager** on older VirtualBox versions).
 2. Create a new **Host-only Network** if none exists (default name `vboxnet0`).
-3. Note its IPv4 address — default `192.168.56.1`. This is the Windows host's address as seen from
-   the VM, and the default this project's `.env.example`/`HOST_LM_STUDIO_IP` and
-   `scripts/00_setup_rocky9_host.sh`'s `LOCAL_SUBNET` assume. If yours differs, use that value
-   everywhere `192.168.56.1`/`192.168.56.0/24` appears below.
+3. Note its IPv4 address and subnet. The address is the Windows host's address as seen from the VM,
+   and it goes in `HOST_LM_STUDIO_IP`. The subnet goes in `LOCAL_SUBNET`. Use your actual values
+   wherever `<host-only-subnet-cidr>` or `<windows-host-only-ip>` appears in these docs.
 4. Leave its DHCP server enabled so the VM gets an IP automatically.
 
 ## 3. Create the Rocky 9 VM
@@ -80,38 +82,32 @@ git clone https://github.com/cv-ai-sec/cv-hermes.git
 cd cv-hermes
 ```
 
-If you haven't pushed yet, use `scp` from Windows over the SSH port-forward instead:
+If you haven't pushed yet, use `scp` from Windows over the SSH port-forward instead (substitute your repo path):
 ```powershell
-scp -P 2223 -r "D:\Ai projects\Projects\cv-hermes" <user>@127.0.0.1:~/
+scp -P 2223 -r "<path-to-cv-hermes>" <user>@127.0.0.1:~/
 ```
 
 ## 6. Run the host provisioning script
 
-Open `scripts/00_setup_rocky9_host.sh` first and check the variables at the top — `LOCAL_SUBNET`
-defaults to `192.168.56.0/24` (the host-only subnet from step 2), `GRAFANA_PORT` defaults to `3000`,
-`TASK_DASHBOARD_PORT` defaults to `8502`, and `WEB_CHAT_PORT` defaults to `8503`; only change these
-if your host-only network uses a different range, or a default port is unavailable for some other
-reason.
+Set `LOCAL_SUBNET` to the VM's host-only subnet (the range from step 2, in CIDR form). The script
+requires it, with no default. `GRAFANA_PORT` (3000), `HERMES_API_PORT` (8642), and
+`HERMES_DASHBOARD_PORT` (9119) have defaults; change them only if one is taken.
 
 ```bash
-sudo bash scripts/00_setup_rocky9_host.sh
+export LOCAL_SUBNET=<host-only-subnet-cidr>
+sudo -E bash scripts/00_setup_rocky9_host.sh
 ```
 
-This installs Docker CE + the Compose plugin, `git`, configures `firewalld` (SSH + Grafana + the
-task dashboard + the local web chat UI, all from `LOCAL_SUBNET` only + blocks `obs-net`'s egress
-entirely), and sets the SELinux boolean containers need under enforcing mode.
+This installs Docker CE and the Compose plugin, `git`, and configures `firewalld` (SSH, plus Grafana,
+the Hermes API, and the Hermes dashboard, all from `LOCAL_SUBNET` only, with `obs-net`'s egress
+blocked). It also sets the SELinux boolean containers need under enforcing mode.
 
-**Already provisioned this VM before the task dashboard/web chat existed?** The script is safe to
-re-run in full (its `firewall-cmd` calls are idempotent), or apply just the new rules by hand:
-```bash
-sudo firewall-cmd --permanent --zone=public --add-rich-rule="rule family='ipv4' source address='192.168.56.0/24' port port='8502' protocol='tcp' accept"
-sudo firewall-cmd --permanent --zone=public --remove-port='8502/tcp' 2>/dev/null || true
-sudo firewall-cmd --permanent --zone=public --add-rich-rule="rule family='ipv4' source address='192.168.56.0/24' port port='8503' protocol='tcp' accept"
-sudo firewall-cmd --permanent --zone=public --remove-port='8503/tcp' 2>/dev/null || true
-sudo firewall-cmd --reload
-```
-(swap in your actual `LOCAL_SUBNET`/ports if you changed the defaults) — and record the change in
-`Projects\firewall-audit-log\CHANGELOG.md` per this workspace's standing convention.
+Then apply the hermes-agent egress policy (step 9 covers when to run it).
+
+**Re-running on an older setup:** the script is safe to re-run. Rich rules for ports that are no
+longer used (8502, 8503, 8504) must be removed by hand. List them with
+`sudo firewall-cmd --list-rich-rules` and remove each with `--remove-rich-rule`. Record the change in
+`Projects\firewall-audit-log\CHANGELOG.md`.
 
 Log out and back in (or `newgrp docker`) so your user's new `docker` group membership takes effect:
 
@@ -122,11 +118,12 @@ docker run --rm hello-world
 
 ## 7. Install LM Studio on the Windows host (not inside the VM)
 
-Skip this step if you're pointing `LLM_API_BASE` at a cloud provider instead.
+**This build uses local models only.** There is no cloud LLM provider. The egress proxy would block
+one anyway.
 
 1. Download and install LM Studio normally on Windows.
-2. Download an open-weight model (`.env.example` defaults to `qwen2.5-7b-instruct` — adjust
-   `LLM_MODEL` in `.env` to match whatever model ID LM Studio reports).
+2. Download the model this build uses, `qwen/qwen2.5-vl-7b`, and set it in the setup wizard
+   (`hermes-data/config.yaml`). Use the exact model ID LM Studio reports.
 3. Go to LM Studio's **Developer** tab and start the local server.
 4. Enable **"Serve on Local Network"** so it binds to `0.0.0.0:1234` instead of `127.0.0.1` (the VM
    can't reach a literal loopback bind on the Windows host).
@@ -134,68 +131,89 @@ Skip this step if you're pointing `LLM_API_BASE` at a cloud provider instead.
    host-only subnet:
    ```powershell
    New-NetFirewallRule -DisplayName "LM Studio - VM only" -Direction Inbound -Protocol TCP `
-     -LocalPort 1234 -RemoteAddress 192.168.56.0/24 -Action Allow
+     -LocalPort 1234 -RemoteAddress <host-only-subnet-cidr> -Action Allow
    ```
-   (Run as Administrator. Adjust `192.168.56.0/24` if your host-only network uses a different
-   range. Skip this if you already added it for `ai-cybersecurity-devops-lab` — one rule covers
+   (Run as Administrator. Replace `<host-only-subnet-cidr>` with your host-only network's range. Skip this if you already added it for `ai-cybersecurity-devops-lab` — one rule covers
    both, since both VMs sit on the same host-only subnet.)
 
    **Don't also add a second "block everyone else" rule.** An earlier version of this guide did,
    and it caused a real, hard-to-diagnose outage: Windows Firewall gives Block rules precedence
    over Allow rules whenever both match the same traffic, regardless of specificity — so a
    `Block` rule scoped to `RemoteAddress Any` also matches (and silently defeats) the `Allow` rule
-   above, since `Any` includes `192.168.56.0/24` too. The single Allow rule is sufficient on its
+   above, since `Any` includes your host-only subnet too. The single Allow rule is sufficient on its
    own: Windows Firewall already denies everything not explicitly allowed. Full incident writeup
    in this workspace's local-only `Projects\firewall-audit-log\CHANGELOG.md`.
 
 ## 8. Configure environment and bring up the stack
 
+Two env files, two jobs (both git-ignored, see `.env.example`):
+
+- `.env` at the repo root: compose-level values (`HERMES_BIND_IP`, `HOST_LM_STUDIO_IP`,
+  `EGRESS_PROXY_IP`, `EGRESS_PROXY_IMAGE`, `HERMES_IMAGE_TAG`, `GRAFANA_ADMIN_PASSWORD`).
+- `hermes-data/.env`: the agent's own secrets (`DISCORD_BOT_TOKEN`, dashboard login, `API_SERVER_KEY`,
+  `DISCORD_PROXY`, `OPENAI_API_KEY`). The container reads this file.
+
 ```bash
 cp .env.example .env
+mkdir -p hermes-data
+nano .env                 # compose-level values
+nano hermes-data/.env     # agent secrets; generate keys with: openssl rand -hex 32
 ```
 
-Edit `.env` and fill in `DISCORD_TOKEN`/`DISCORD_APPLICATION_ID` (from the
-[Discord Developer Portal](https://discord.com/developers/applications)). Leave `REVOLT_TOKEN`
-blank — Revolt is scaffolded but not currently functional (a dependency conflict, see
-`hermes_agent/requirements.txt`); setting it without the package installed fails with a clear error
-rather than running. Confirm `HOST_LM_STUDIO_IP` matches your host-only adapter's IP (check with
-`ip addr show | grep 192.168.56` inside the VM), and change `GRAFANA_ADMIN_PASSWORD` from its
-placeholder.
+Get `DISCORD_BOT_TOKEN` from the [Discord Developer Portal](https://discord.com/developers/applications).
+Enable the Message Content and Server Members intents for the bot.
 
-`docker-compose.yml` lives at the repo root here (unlike `ai-cybersecurity-devops-lab`, which keeps
-it in a `docker/` subfolder) — so a plain `docker compose` from the repo root picks up both the
-compose file and `.env` automatically:
+Configure the LLM with the agent's setup wizard, which writes its config into `hermes-data/`:
 
 ```bash
-docker compose up -d
+docker run -it --rm -v "$PWD/hermes-data:/opt/data" nousresearch/hermes-agent:v2026.9.24 setup
+```
+
+Choose a custom OpenAI-compatible endpoint and set the base URL to LM Studio on the Windows host
+(`HOST_LM_STUDIO_IP`, port 1234, `/v1`). The model is the one loaded in LM Studio.
+
+Start the stack:
+
+```bash
+docker compose up -d --remove-orphans
 docker compose ps
 ```
 
-## 9. Verify network isolation
+Every service should show `Up`. Then apply the egress policy (step 9).
 
-Confirm `obs-net` (Loki/Promtail/Grafana) genuinely cannot reach the internet — this should time
-out, not succeed:
+## 9. Apply the egress policy
+
+hermes-agent's outbound traffic goes only through the egress proxy, and firewalld restricts the
+proxy to the Discord hosts. Run after `docker compose up -d` has created the networks:
+
+```bash
+export LM_STUDIO_IP=<HOST_LM_STUDIO_IP from .env>
+export EGRESS_PROXY_IP=<EGRESS_PROXY_IP from .env>
+sudo -E bash scripts/01_apply_hermes_egress_policy.sh
+sudo systemctl restart docker
+docker compose up -d
+```
+
+Confirm the agent can reach LM Studio and cannot reach the internet directly:
+
+```bash
+docker exec hermes-agent curl -m 5 -sS http://host.docker.internal:1234/v1/models
+docker exec hermes-agent curl -m 5 -sS https://example.com   # should fail
+```
+
+Confirm `obs-net` (Loki/Promtail/Grafana) cannot reach the internet. This should time out:
 
 ```bash
 docker compose exec grafana curl -m 3 -sS https://8.8.8.8
 ```
 
-Confirm hermes-agent can reach LM Studio on the Windows host (skip if using a cloud LLM API):
+## 10. Access the dashboard and Grafana
 
-```bash
-docker compose exec hermes-agent curl -m 3 -sS http://host.docker.internal:1234/v1/models
-```
+Find the VM's host-only IP on the VM with `ip -4 addr show`. From a machine on `LOCAL_SUBNET`:
 
-## 10. Access Grafana
-
-Find the VM's host-only IP:
-
-```bash
-ip addr show | grep 192.168.56
-```
-
-Then from Windows, visit `http://<that-ip>:<GRAFANA_PORT>` (e.g. `http://192.168.56.102:3000` —
-yours may differ; DHCP-assigned host-only IPs are usually stable across reboots but not guaranteed).
+- `http://<VM host-only IP>:9119`: the Hermes dashboard (login required).
+- `http://<VM host-only IP>:3000`: Grafana. The Hermes health panels show no data until Promtail
+  is updated (see `Projects\cv-hermes-audit-log\CHANGELOG.md`).
 Log in with `GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD` from `.env`. The **Hermes Agent Overview**
 dashboard is auto-provisioned.
 

@@ -1,39 +1,50 @@
 # Architecture
 
+This project runs the official [Hermes Agent](https://hermes-agent.nousresearch.com/) image, repurposed
+for learning the OWASP Top 10 for LLM Applications in a controlled VM and Docker lab. Setup steps and gateway concepts are in the
+[quickstart](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart).
+
 ```mermaid
 graph LR
-  A[Discord Gateway] <-->|via NAT adapter| B[Hermes Agent]
-  V[Browser web chat] <-->|host-only IP, LOCAL_SUBNET only| B
+  A[Discord Gateway] <-->|via NAT adapter| B[Hermes Core]
+  G[Hermes GUI — static page] -->|fetch/WebSocket, CORS| B
+  U[User's browser] -->|host-only IP, LOCAL_SUBNET only| G
   B -->|chat completion| C[LM Studio on Windows host]
   B -->|summarize command| Y[yt-dlp: transcript only]
   Y --> B
   B -->|note generation| N[./notes/*.md]
   B -->|task status| T[(SQLite task DB)]
-  W[Task Dashboard] -->|read/write, same file| T
-  U -->|host-only IP, LOCAL_SUBNET only| W
   B -->|JSON log lines, shared volume| D[Promtail]
   D -->|HTTP push :3100| E[Loki]
   F[Grafana] -->|query, incl. Hermes health| E
-  U[User's browser] -->|host-only IP, LOCAL_SUBNET only| F
+  U -->|host-only IP, LOCAL_SUBNET only| F
 ```
 
+`B` ("Hermes Core", the `hermes-agent` container) owns all state — `TaskDB`, `soul.py`, `health.py` —
+and is the only thing that ever touches `./data/tasks.db`. `G` (the `hermes-gui` container) is pure
+presentation: a static page with no database, no secrets, and no network reach of its own. The
+browser loads `G`'s page, then talks **directly** to `B`'s published port for everything (chat over
+`/ws`, tasks/health/config over `/api/*`) — `G`'s own container is never in that request path. See
+"Hermes GUI" below.
+
 `C` defaults to LM Studio running on the Windows host, reached over VirtualBox's host-only adapter
-(`host.docker.internal` → `HOST_LM_STUDIO_IP`, same pattern as `ai-cybersecurity-devops-lab`) — swap
-`LLM_API_BASE`/`LLM_API_KEY` in `.env` for a cloud provider instead if you'd rather not run a local
-model.
+(`host.docker.internal` → `HOST_LM_STUDIO_IP`, same pattern as `ai-cybersecurity-devops-lab`).
+
+**Local models only for now:** no cloud LLM provider is configured or permitted. Changing that needs
+a new audit entry and a `docs/SECURITY.md` update.
 
 ## Components
 
 | Component | Role | Network exposure |
 |---|---|---|
-| Hermes Agent (`hermes_agent/`) | discord.py bot + local web chat (`adapters/web_adapter.py`) + OpenAI-compatible LLM client; sandboxed file tools; transcript/notes/task pipeline; background health heartbeat (`health.py`) | `agent-net` — the one container allowed outbound internet, to the Discord Gateway, LM Studio on the Windows host, and YouTube (for transcript fetching via `yt-dlp`). Also publishes `WEB_CHAT_PORT` inbound, firewalld-restricted to `LOCAL_SUBNET` like Grafana. |
+| Hermes Core (`hermes_agent/`, container `hermes-agent`) | discord.py bot + the core's own API/WS adapter (`adapters/web_adapter.py`) + OpenAI-compatible LLM client; sandboxed file tools; transcript/notes/task pipeline; background health heartbeat (`health.py`). Owns `TaskDB` — the only container that ever touches `./data/tasks.db`. | `agent-net` — the one container allowed outbound internet, to the Discord Gateway, LM Studio on the Windows host, and YouTube (for transcript fetching via `yt-dlp`). Also publishes `WEB_CHAT_PORT` inbound (chat WebSocket + `/api/*`), firewalld-restricted to `LOCAL_SUBNET` like Grafana. |
 | Loki (`config/loki-config.yaml`) | Log storage | `obs-net` only — no internet, see Trust boundaries |
 | Promtail (`config/promtail-config.yaml`) | Tails the shared `hermes-logs` volume, ships lines to Loki | `obs-net` only — no internet |
 | Grafana (`dashboards/hermes-overview.json`) | Dashboards over Loki: errors/min, task latency p50/p95, token usage, tool calls, live log stream | `obs-net` + one published port (`GRAFANA_PORT`), reached via the VM's host-only IP and firewalld-restricted to `LOCAL_SUBNET` — no NAT port-forward (see `docs/INSTALL.md` for why) |
 | Sandboxed workspace (`hermes_agent/tools.py`, `./workspace`) | File read/write tools the LLM can call | No network role — a filesystem boundary, not a network one |
 | Task DB (`hermes_agent/services/task_db.py`, `./data/tasks.db`) | Local SQLite table tracking `Backlog`/`In Progress`/`Completed`/`Failed` task status | No network role; not a real AppFlowy/Affine integration, deliberately — see Trust boundaries |
 | Notes service (`hermes_agent/services/notes_service.py`, `./notes/`) | Generates structured markdown notes from a transcript via the LLM, writes them to disk | No network role beyond the LLM call already covered above |
-| Task Dashboard (`task_dashboard/`) | Browser UI to view, add, edit, and delete tasks in the same SQLite file `task_db.py` uses | `obs-net` + one published port (`TASK_DASHBOARD_PORT`) — same firewalld-restricted-to-`LOCAL_SUBNET`, no-NAT-forward posture as Grafana. No outbound internet, since it never needs to reach anything beyond the local SQLite file. |
+| Hermes GUI (`hermes-gui/`) | Unified browser dashboard — chat, task board, live health, a "coming soon" Reasoning Canvas placeholder. Pure static file server; the browser calls Hermes Core's API directly, this container holds no state/secrets/DB access of its own. | `obs-net` + one published port (`HERMES_GUI_PORT`) — same firewalld-restricted-to-`LOCAL_SUBNET`, no-NAT-forward posture as Grafana. No outbound internet and no reach to `agent-net` either — it never makes a server-side call at all. |
 
 ## Chat platform adapters
 
@@ -42,14 +53,15 @@ Built around one shared interface (`hermes_agent/adapters/base.py`'s `ChatAdapte
 platform a message arrived from — adding a platform later means writing one new adapter module, not
 touching command logic.
 
-**Discord and the local web chat are both fully supported.** The web adapter
+**Discord and the web chat (via Hermes GUI) are both fully supported.** The web adapter
 (`hermes_agent/adapters/web_adapter.py`) runs an embedded FastAPI/uvicorn server inside the same
-process as the Discord adapter, serving a small browser chat page over a WebSocket. It calls
-`CommandRouter.handle()` exactly like Discord does — `summarize`/`task`/plain chat all behave
-identically — so chatting with Hermes no longer requires a Discord account, server, or token at all.
-No auth of its own; same firewalld-restricted-to-`LOCAL_SUBNET` posture as Grafana and the task
-dashboard (see `WEB_CHAT_PORT` in `.env.example`). Set `WEB_CHAT_ENABLED=false` for a Discord-only
-deployment.
+process as the Discord adapter, exposing a chat WebSocket (`/ws`) plus a small `/api/*` surface the
+separate `hermes-gui` container's static page calls. It calls `CommandRouter.handle()` exactly like
+Discord does — `summarize`/`task`/plain chat all behave identically — so chatting with Hermes no
+longer requires a Discord account, server, or token at all. This adapter has no page of its own
+(the old standalone `/` chat page was removed — see "Hermes GUI" below); it's purely a backend now.
+No auth of its own; same firewalld-restricted-to-`LOCAL_SUBNET` posture as Grafana and Hermes GUI
+(see `WEB_CHAT_PORT` in `.env.example`). Set `WEB_CHAT_ENABLED=false` for a Discord-only deployment.
 
 **Revolt is scaffolded but not currently functional** — the adapter
 code exists (`hermes_agent/adapters/revolt_adapter.py`), but `revolt.py` (the only readily-available
@@ -92,32 +104,62 @@ summaries coherently) that isn't justified until there's an actual need for full
 long videos. A truncated note says so explicitly in its own content, rather than silently covering
 less than the user would assume.
 
-## Task dashboard
+## Hermes GUI
 
-`task_dashboard/` is a small standalone FastAPI service (its own container, its own Dockerfile —
-see `docker-compose.yml`) giving a browser view of the same task board the Discord `task`/
-`summarize` commands write to: list tasks by status, add one with a title/description, change its
-status, or delete it. It talks to `./data/tasks.db` directly, not through `hermes-agent` — see
-`task_dashboard/db.py`'s module docstring for why it's a standalone copy of the schema/pragmas
-rather than an import of `hermes_agent/services/task_db.py` (separate Docker build contexts; the
-only thing meant to be shared is the file, not the code — if the schema changes in one, mirror it in
-the other).
+`hermes-gui/` is the unified browser dashboard that replaced two separate earlier UIs (a standalone
+task dashboard at one port, a standalone plain-chat page at another). It's intentionally a **pure
+static file server** (`hermes-gui/app.py` just mounts and serves `static/index.html` — no database,
+no secrets, no `.env`, no volumes, no outbound calls of its own). The browser loads that page, then
+talks **directly** to Hermes Core's own published port (`WEB_CHAT_PORT`) for everything: chat over
+`/ws`, and tasks/health/config over `/api/*` (added to `hermes_agent/adapters/web_adapter.py`, with
+`CORSMiddleware` enabled since the GUI's page and Hermes Core's API are different origins by port).
+This is what makes the architecture genuinely decoupled — the GUI container is swappable or
+scalable independently of Hermes Core, and Hermes Core has zero knowledge of how many GUI instances
+(if any) are looking at it.
 
-**Deliberately not yet a queue Hermes drains.** Adding a task from the dashboard puts it in
-`Backlog`, visible there and over `!hermes task` lookups, but `hermes-agent` has no background
-poller watching for new `Backlog` rows and does not act on a dashboard-created task on its own — it
-only ever creates/updates tasks in direct response to a Discord command (`_handle_task`/
-`_handle_summarize` in `hermes_agent/bot/commands.py`). This is scoped out for now rather than an
-oversight: "ingest and act on a task created elsewhere" is a real feature (a polling loop, a way to
-decide what kind of task it is and what pipeline to run) worth building once there's an actual
-workflow that needs it, not speculatively. Today the dashboard's value is organizing/viewing what's
-already there and a faster way to jot a task than a Discord command — not autonomous pickup.
+The `/api/tasks*` routes are thin wrappers around the exact same `TaskDB` instance `main.py` already
+constructs for the Discord/`summarize` pipeline — there is now only **one** thing that ever opens
+`./data/tasks.db` (Hermes Core itself), not two. The previous standalone `task_dashboard/` container,
+which read/wrote that file directly from a second process, has been retired entirely.
+
+**Four tabs today:**
+- **Chat** — same WebSocket-based chat as the old standalone page, just inside the unified GUI now.
+- **Tasks** — the same 4-column board (Backlog/In Progress/Completed/Failed) the old task-dashboard
+  had, now backed by `/api/tasks` instead of a direct file read.
+- **Health** — `/api/health` + `/api/config`, polled every ~10s: LLM reachability, soul.md load
+  status, uptime, active adapters, and the currently configured model/endpoint/context window
+  (read-only — see below). "Real-time" here means "as of the last heartbeat tick"
+  (`HEALTH_INTERVAL_SECONDS`), the same cached snapshot `health.HealthState` also feeds into the
+  Grafana heartbeat event — opening this tab never itself triggers an extra LLM ping.
+- **Reasoning Canvas** — a labeled "coming soon" placeholder, not faked data. It needs an actual
+  LLM tool-calling loop first: `WorkspaceTools` (read/write/list workspace file) is fully built and
+  self-logs via `metrics.log_tool_call`, but `commands.py`'s `_call_llm` never passes a `tools=`
+  schema to the chat-completion call or parses `tool_calls` back — the LLM cannot actually invoke a
+  tool today, so there is nothing yet to trace live. Building that loop and wiring this tab to it is
+  a tracked follow-up, not done in this pass.
+
+**Model endpoint configuration is read-only, deliberately.** `/api/config` returns
+`llm_api_base`/`llm_model`/`llm_context_window`/`command_prefix` — never `llm_api_key` or any other
+secret. Making this live-editable from the GUI was considered and explicitly deferred: it would mean
+a new write-path that can redirect where Hermes's LLM traffic goes, exposed on a port with no
+app-level authentication (see Trust boundaries below) — real enough scope and risk to warrant its
+own pass later rather than bundling it in here. For now, changing the LLM endpoint still means
+editing `.env` and restarting `hermes-agent`, same as before.
+
+**Deliberately still not a queue Hermes drains.** Adding a task from the GUI (or Discord) puts it in
+`Backlog`, but `hermes-agent` has no background poller watching for new `Backlog` rows and does not
+act on one on its own — it only ever creates/updates tasks in direct response to a Discord/web chat
+command (`_handle_task`/`_handle_summarize` in `hermes_agent/bot/commands.py`). This is scoped out
+for now rather than an oversight — see the tool-calling note above; autonomous task pickup is the
+same class of follow-up work.
 
 ## Hermes health
 
 Two things were previously invisible and are now tracked the same way token usage already is — via
 `metrics.py` events shipped through Promtail/Loki to a "Hermes health" panel row in
-`dashboards/hermes-overview.json`:
+`dashboards/hermes-overview.json` (historical trend view), and as a real-time snapshot in Hermes
+GUI's Health tab (`health.HealthState`, see "Hermes GUI" above — same underlying heartbeat, two
+different views of it):
 
 1. **Persona/system-prompt status.** `hermes_agent/soul.py` loads `config/soul.md` once at startup
    as `CommandRouter`'s system prompt (`soul_path`/`SOUL_MD_PATH`, see `.env.example`). If the file
@@ -146,6 +188,30 @@ is answerable from Grafana without SSHing in and tailing logs.
 acting on these signals (e.g. alerting, or truncating/rejecting a request that would overflow
 context) is a real follow-up, not something to bolt on silently alongside a health dashboard.
 
+## Rogue-entity detection: decoupled sensor (decided, not yet built)
+
+Hermes never scans the network. A separate **sensor** container does, and Hermes only reads its
+output.
+
+```
+Lab subnet  ->  sensor (read-only discovery, strict scan scope)
+            ->  findings volume (sensor writes, Hermes mounts read-only)
+            ->  Hermes (schema-validated ingest, no scan tools, no raw sockets)
+```
+
+- **Sensor:** runs predetermined discovery jobs on a timer. Scan targets are an explicit allowlist
+  of the lab subnet. It has its own firewall scope and no route to the LLM or the internet.
+- **Findings:** structured JSON, validated against a schema before Hermes reads them. Hostnames,
+  banners, and service responses are untrusted data, so they're treated as indirect prompt
+  injection (LLM01), not instructions.
+- **On-demand scans:** Hermes doesn't run them. If one is needed, Hermes publishes a request to a
+  job queue. A controller validates the arguments against the allowlist, then signals the sensor.
+- **Why:** Hermes can't be steered into reconnaissance by prompt injection (LLM06), and a flaw in a
+  scanning tool stays inside the disposable sensor container.
+- **Cost:** no real-time probing. Hermes works from the latest completed scan, which can be stale.
+- **Firewall:** the sensor's scan access and its findings path are a new firewall change. That
+  entry gets written to `Projects\cv-hermes-audit-log\CHANGELOG.md` before it's applied.
+
 ## Trust boundaries
 
 - **Chat message (Discord or web) → LLM:** every inbound message, regardless of which adapter it
@@ -160,33 +226,25 @@ context) is a real follow-up, not something to bolt on silently alongside a heal
 - **Secrets → config:** `hermes_agent/config.py` reads `DISCORD_TOKEN` and `LLM_API_KEY` from the
   environment only, never from `hermes.yaml`. A leaked or accidentally-committed YAML config file
   cannot leak a credential, because the credential was never representable there.
-- **agent-net vs. obs-net:** this is a deliberate, documented exception to this workspace's default
-  "air-gapped container lab" posture (see `docs/SECURITY.md`). Hermes's entire purpose requires
-  reaching the Discord Gateway and an LLM API, so `agent-net` is left open. `obs-net`
-  (Loki/Promtail/Grafana) has no such requirement and stays firewalld-blocked from the internet —
-  the exception is scoped to exactly the one container that needs it, not the whole stack.
-- **User-supplied URL → outbound fetch:** the `summarize <url>` command passes a user-controlled URL
-  straight to `yt-dlp`, which can fetch from many sites, not only YouTube. This is an accepted,
-  bounded risk rather than a gap: `hermes-agent` already has open egress on `agent-net` by design (to
-  reach Discord and an LLM API), so a user directing it to fetch an arbitrary URL doesn't grant
-  any network reach it didn't already have — it can't be used to reach `obs-net` (firewalld-blocked
-  from everything) or pivot anywhere `agent-net` itself can't already go.
-- **Task dashboard has no authentication of its own:** same model as Grafana — it relies entirely on
-  firewalld restricting the published port to `LOCAL_SUBNET`, not an app-level login. Anyone who can
-  reach that subnet can view/add/edit/delete tasks. Acceptable for a single-user home lab; do not
-  change `TASK_DASHBOARD_PORT`'s firewalld rule to allow a wider source range without adding real
-  auth first.
-- **Local web chat has no authentication of its own either:** same model as the task dashboard and
-  Grafana — firewalld restricts `WEB_CHAT_PORT` to `LOCAL_SUBNET`, not an app-level login. Anyone who
-  can reach that subnet can chat with Hermes, including running `summarize`/`task`. Acceptable for a
-  single-user home lab; do not widen that firewalld rule without adding real auth first.
-- **Two writers, one SQLite file:** `hermes-agent` and `task-dashboard` both open `./data/tasks.db`
-  concurrently. WAL mode + a 10s busy timeout (set in both `task_db.py` and `task_dashboard/db.py`)
-  make simultaneous access safe rather than erroring with "database is locked" — but it's
-  last-writer-wins on a given row, not transactional isolation across the two services. Accepted at
-  this scale (a personal task list, not concurrent multi-user writes); a real conflict would need
-  both services editing the exact same task within the same ~second, which isn't a realistic
-  scenario here.
+- **agent-net vs. obs-net:** the agent is not air-gapped. Its only internet route is the Squid egress
+  proxy, limited to `discord.com` and `gateway.discord.gg`, enforced by firewalld
+  (`scripts/01_apply_hermes_egress_policy.sh`). `obs-net` (Loki/Promtail/Grafana) has no
+  internet route at all. See `docs/SECURITY.md` for the accepted risks.
+- **User-supplied URL → outbound fetch:** the old `summarize <url>` pipeline is retired with the custom
+  `hermes_agent/` code. Any future fetch tool is subject to the egress allowlist above, so it can only
+  reach the two Discord hosts.
+- **Neither Hermes GUI nor Hermes Core's API has authentication of its own:** same model as
+  Grafana — both rely entirely on firewalld restricting `HERMES_GUI_PORT`/`WEB_CHAT_PORT` to
+  `LOCAL_SUBNET`, not an app-level login. Anyone who can reach that subnet can chat with Hermes
+  (including running `summarize`/`task`) and view/add/edit/delete tasks. Acceptable for a
+  single-user home lab; do not widen either firewalld rule without adding real auth first. This is
+  also exactly why `/api/config` is read-only (see "Hermes GUI" above) — an unauthenticated port is
+  not where a live LLM-endpoint-redirect control belongs.
+- **One writer, one SQLite file — by design now, not just by convention:** only `hermes-agent` ever
+  opens `./data/tasks.db` (the retired `task_dashboard/` used to be a second direct writer; it's now
+  an `/api/tasks` client like everything else). WAL mode + a 10s busy timeout are still set in
+  `task_db.py` — cheap insurance in case of overlapping requests within hermes-agent's own process,
+  not a multi-process concurrency requirement anymore.
 - **LLM-generated note content → disk:** `NotesService` writes the LLM's markdown output to disk
   without sanitizing it first. This is acceptable because the output is plain text saved to a `.md`
   file, never executed, never interpolated into a shell command, and never served back as HTML — the

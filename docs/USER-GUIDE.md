@@ -1,5 +1,7 @@
 # User Guide
 
+Built on the official [Hermes Agent](https://hermes-agent.nousresearch.com/) ([quickstart](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart)).
+
 Day-to-day reference for a stack that's already up and running. This is different from
 [INSTALL.md](INSTALL.md) (one-time setup) and [README.md](../README.md) (project overview) — this
 is the page to open when you just want to know "what's the URL for X again?" or "how do I check
@@ -10,19 +12,20 @@ Y?" without re-reading the full setup guide.
 Run **on the VM**, not Windows:
 
 ```bash
-ip addr show | grep 192.168.56
+ip -4 addr show
 ```
 
-The address shown (e.g. `192.168.56.102`) is DHCP-assigned and usually stable across reboots, but
-not guaranteed — re-check here if anything below stops resolving.
+Use the address on the host-only interface (the second adapter, not `10.0.2.x`). It's
+DHCP-assigned and usually stable across reboots, but not guaranteed. Re-check here if anything below
+stops resolving.
 
 ## Quick reference
 
 | What | Where | Notes |
 |---|---|---|
+| **Hermes GUI** (chat, tasks, live health — start here) | `http://<VM_host-only-IP>:<HERMES_GUI_PORT>` (default port `8504`) | No login of its own — only reachable from `LOCAL_SUBNET` (firewalld-enforced). Static page; talks directly to the Hermes Core API port below. |
+| Hermes Core API (chat WebSocket + `/api/*`, used by Hermes GUI) | `http://<VM_host-only-IP>:<WEB_CHAT_PORT>` (default port `8503`) | No login of its own — same firewalld posture as above. You don't need to open this directly; Hermes GUI calls it for you. |
 | Grafana (dashboards) | `http://<VM_host-only-IP>:<GRAFANA_PORT>` (default port `3000`) | Login: `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` from `.env`. Only reachable from `LOCAL_SUBNET` (firewalld-enforced). |
-| Task dashboard (view/add/edit tasks) | `http://<VM_host-only-IP>:<TASK_DASHBOARD_PORT>` (default port `8502`) | No login of its own — only reachable from `LOCAL_SUBNET` (firewalld-enforced), same posture as Grafana. Reads/writes the same `./data/tasks.db` the bot uses. |
-| Local web chat (talk to Hermes without Discord) | `http://<VM_host-only-IP>:<WEB_CHAT_PORT>` (default port `8503`) | No login of its own — same firewalld posture as above. `summarize <url>`/`task <title>`/plain chat all work exactly like they do in Discord. |
 | Loki (log storage) | No direct URL — query only through Grafana | Not published outside `obs-net`; use Grafana's **Explore** view for ad-hoc LogQL, or the pre-built dashboard panels. |
 | SSH into the VM | `ssh -p 2223 <user>@127.0.0.1` (from Windows) | Port `2223`, not `2222` — `2222` is `ai-cybersecurity-devops-lab`'s VM. See `firewall-audit-log` if this ever changes. |
 | LM Studio (LLM backend) | Running on Windows, not browsable — check its own Developer tab | Reachable from the VM at `http://host.docker.internal:1234` (mapped to `HOST_LM_STUDIO_IP`). |
@@ -75,22 +78,21 @@ the "Browse notes/" link on the viewer page itself)
    ```bash
    docker compose ps
    ```
-   You should see `hermes-agent`, `loki`, `promtail`, `grafana`, and `task-dashboard`, all showing
+   You should see `hermes-agent`, `loki`, `promtail`, `grafana`, and `hermes-gui`, all showing
    `Up`/`running` — not `Restarting`. If `hermes-agent` is restarting, check
    `docker compose logs hermes-agent --tail 30` before assuming the rest of the stack is fine (it's
    the one container doing the most at startup: Discord gateway connection, loading `config/soul.md`,
-   and starting the embedded web chat server all happen here).
+   and starting the embedded core API/chat server all happen here).
 5. Confirm each surface is actually reachable, not just "container says Up" — from Windows, using the
    VM's host-only IP (see above):
+   - **Hermes GUI** (`:8504`, or your `HERMES_GUI_PORT`): page loads, status line reads "connected
+     to core API", Chat sends/receives, and the Tasks tab shows existing tasks (or an empty board on
+     a fresh install) — confirms it can reach Hermes Core's `/api/*`.
    - **Grafana** (`:3000`, or your `GRAFANA_PORT`): log in, open **Hermes Agent Overview**, and check
      the **Hermes health** row — `LLM backend reachable` should read `UP` within one
      `HEALTH_INTERVAL_SECONDS` interval (default 300s) of startup. If it's still blank after that,
      the heartbeat loop hasn't run yet or `hermes-agent` is unhealthy — see "Checking Hermes's
      health" below.
-   - **Local web chat** (`:8503`, or your `WEB_CHAT_PORT`): page loads, status line reads
-     "connected", and a plain message gets a reply.
-   - **Task dashboard** (`:8502`, or your `TASK_DASHBOARD_PORT`): page loads and shows existing
-     tasks (or an empty board on a fresh install) — confirms it can read `./data/tasks.db`.
    - **Discord**: send `!hermes <anything>` in the server you invited the bot to and confirm a reply
      — confirms the Discord gateway connection actually came up, which `docker compose ps` alone
      doesn't tell you (a container can show `Up` while still failing to log in to Discord).
@@ -102,11 +104,12 @@ the "Browse notes/" link on the viewer page itself)
 docker compose down
 ```
 This sends `SIGTERM` and waits for each container to exit cleanly, rather than a hard kill — this
-matters here specifically because `hermes-agent` **and** `task-dashboard` both hold open SQLite
-connections to the same `./data/tasks.db` (WAL mode), and Grafana/Loki have their own on-disk state;
-an abrupt stop risks leaving either in a corrupted or inconsistent state. `docker compose down` does
-**not** delete volumes or your bind-mounted `./notes`/`./data`/`./workspace` — your data is still
-there after this.
+matters here specifically because `hermes-agent` holds an open SQLite connection to
+`./data/tasks.db` (WAL mode) and Grafana/Loki have their own on-disk state; an abrupt stop risks
+leaving either in a corrupted or inconsistent state. `hermes-gui` holds no state of its own, so it
+has nothing to lose on a hard stop — but `docker compose down` stops everything gracefully together
+regardless. `docker compose down` does **not** delete volumes or your bind-mounted
+`./notes`/`./data`/`./workspace` — your data is still there after this.
 
 **Then shut down the VM's OS itself cleanly, over SSH — not a VirtualBox power-off:**
 ```bash
@@ -130,9 +133,16 @@ level.
 
 ## Checking Hermes's health
 
-Open Grafana → the "Hermes health" row on the overview dashboard. Four things to glance at:
+Two views of the same signal — pick whichever fits what you need:
 
-- **LLM backend reachable** — `DOWN` means LM Studio (or whatever `LLM_API_BASE` points at) isn't
+- **Hermes GUI's Health tab** — a live snapshot (as of the last heartbeat), good for "is it working
+  right now?"
+- **Grafana's "Hermes health" row** on the overview dashboard — the same data as a trend over time,
+  good for "has this been flapping?"
+
+Four things to glance at in either view:
+
+- **LLM backend reachable** — `DOWN` means LM Studio (LM Studio on the Windows host; local models only) isn't
   responding; check it's actually running before assuming the bot is broken.
 - **soul.md loaded** — `DEFAULT (soul.md missing)` means `./config/soul.md` wasn't found or was
   empty at startup, and Hermes is running on the generic built-in persona instead. Fix the file and
@@ -149,7 +159,7 @@ Heartbeat runs every `HEALTH_INTERVAL_SECONDS` (default 300s) — a stat panel g
 than that means the heartbeat loop itself stopped, which usually means `hermes-agent` crashed; check
 `docker compose logs hermes-agent`.
 
-## Bot/chat commands (Discord and local web chat — Revolt is scaffolded but not currently functional, see ARCHITECTURE.md)
+## Bot/chat commands (Discord and Hermes GUI's Chat tab — Revolt is scaffolded but not currently functional, see ARCHITECTURE.md)
 
 | Command | What happens |
 |---|---|
@@ -158,15 +168,14 @@ than that means the heartbeat loop itself stopped, which usually means `hermes-a
 | `!hermes task <title>` | Creates a tracked task entry (no note generated) |
 
 (`!hermes ` is the default Discord prefix — check `COMMAND_PREFIX`/`chat.command_prefix` in your
-config if you've changed it. The web chat has no prefix at all — just type `summarize <url>`,
-`task <title>`, or plain chat directly.)
+config if you've changed it. Hermes GUI's Chat tab has no prefix at all — just type
+`summarize <url>`, `task <title>`, or plain chat directly.)
 
-A task can also be created straight from the [task dashboard](#quick-reference) — it lands in
-`Backlog` the same as `!hermes task` would. **Note:** the bot does not currently poll for
-dashboard-created tasks and act on them automatically — see ARCHITECTURE.md's "task dashboard"
-section for why that's a deliberate, scoped-out gap rather than a bug. Today the dashboard is a
-viewing/organizing surface (and a faster way to jot a task than typing a Discord command); it is not
-yet a queue Hermes drains on its own.
+A task can also be created straight from Hermes GUI's **Tasks** tab — it lands in `Backlog` the same
+as `!hermes task` would. **Note:** the bot does not currently poll for GUI-created tasks and act on
+them automatically — see ARCHITECTURE.md's "Hermes GUI" section for why that's a deliberate,
+scoped-out gap rather than a bug. Today the Tasks tab is a viewing/organizing surface (and a faster
+way to jot a task than typing a Discord command); it is not yet a queue Hermes drains on its own.
 
 ## Common day-2 operations
 
