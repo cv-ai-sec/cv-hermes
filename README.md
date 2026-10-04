@@ -1,45 +1,41 @@
 # cv-hermes
 
-A cybersecurity learning lab built on the official **Hermes Agent** by Nous Research. It runs the
-agent's official Docker image with the recommended settings, and adds the lab pieces around it: a
-restricted network, a Discord interface, a local model, and Grafana for observing the agent.
+A cybersecurity learning lab built on the official **Hermes Agent** by Nous Research. It runs the agent's
+official container image with its recommended settings, and adds the lab pieces around it: a restricted
+network, a Discord interface, a local model, and dashboards for observing the agent.
 
 - Hermes Agent (official project): **[hermes-agent.nousresearch.com](https://hermes-agent.nousresearch.com/)**
 - Hermes quickstart: **[quickstart](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart)**
 
 ## Focus
 
-The lab focuses on the **OWASP Top 10 for LLM Applications** (2025): prompt injection (LLM01),
-sensitive information disclosure (LLM02), supply chain (LLM03), data and model poisoning (LLM04),
-improper output handling (LLM05), excessive agency (LLM06), system prompt leakage (LLM07), vector and
-embedding weaknesses (LLM08), misinformation and overreliance (LLM09), and unbounded consumption (LLM10).
+The lab focuses on the **OWASP Top 10 for LLM Applications** (2025): prompt injection, sensitive information
+disclosure, supply chain, data and model poisoning, improper output handling, excessive agency, system prompt
+leakage, vector and embedding weaknesses, misinformation and overreliance, and unbounded consumption.
 The classic web OWASP Top 10 is out of scope.
 
-A planned addition is rogue-entity detection on the lab network (unauthorized MCP servers, rogue agents).
-It is designed but not built: a separate read-only sensor will feed findings to the agent. See
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+A planned addition is detection of unauthorized entities on the lab network, such as rogue MCP servers and
+unknown agents. It is designed but not built.
 
 ## What runs
 
-| Piece | Where | Reached at |
-|---|---|---|
-| Hermes agent (official image, pinned) | `hermes-agent` container | Dashboard `:9119`, API `:8642` on the VM's host-only address |
-| Egress proxy (Squid) | `hermes-egress-proxy` | Internal only. Allows `discord.com` and `gateway.discord.gg`. |
-| Grafana, Loki, Promtail | `hermes-grafana`, `hermes-loki`, `hermes-promtail` | Grafana `:3000`. Loki internal only. |
-| LLM | LM Studio on the Windows host | `:1234`, local models only |
+- The agent, in its official container, with a dashboard and an API. Both require credentials and are reachable
+  only from the lab network.
+- An egress proxy. It is the agent's only route to the internet, and it allows a short list of hosts.
+- A local language model served by LM Studio on the host machine. No cloud model provider is used.
+- Grafana and Loki for observing the agent's logs. They have no internet route.
 
-Network posture, accepted risks, and the firewall rules are in [docs/SECURITY.md](docs/SECURITY.md).
-This is **not** an air-gapped environment: the agent has two outbound hosts (Discord), through the proxy.
+This is **not** an air-gapped environment. The agent reaches two outside hosts through the proxy.
+The security rules and accepted risks are in [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Documentation
 
-- [docs/INSTALL.md](docs/INSTALL.md): one-time setup on the VirtualBox VM
-- [docs/USER-GUIDE.md](docs/USER-GUIDE.md): day-to-day start, stop, and checks
+- [docs/INSTALL.md](docs/INSTALL.md): one-time setup
+- [docs/USER-GUIDE.md](docs/USER-GUIDE.md): day-to-day operation
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how the pieces connect
-- [docs/SECURITY.md](docs/SECURITY.md): posture, accepted risks, pre-commit checks
+- [docs/SECURITY.md](docs/SECURITY.md): rules and accepted risks
 
-## Secrets
+## Secrets and addresses
 
-Real values never go in this repo. The compose `.env` holds addresses and ports. The agent's secrets
-(Discord token, dashboard login, API key) go in `hermes-data/.env`. Both are git-ignored, and
-`.env.example` and `hermes-data/.env.example` hold placeholders only.
+Real values, addresses, and credentials never go in this repository. Configuration files hold placeholders only.
+The live values are kept in local, git-ignored files on the machine that runs the lab.

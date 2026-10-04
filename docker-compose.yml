@@ -134,24 +134,25 @@ services:
       - loki
 
 networks:
+  # Subnets are set in the local .env (see .env.example). Dynamic addresses on agent-net come only from
+  # the range in AGENT_NET_DYNAMIC_RANGE, so the egress proxy's fixed address can't be taken by the agent
+  # when containers restart in a different order.
   agent-net:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.28.10.0/24
-          # Dynamic addresses come only from the upper half, so the egress proxy's fixed
-          # 172.28.10.2 can't be taken by the agent when containers restart in a different order.
-          ip_range: 172.28.10.128/25
+        - subnet: ${AGENT_NET_SUBNET:?set AGENT_NET_SUBNET in .env}
+          ip_range: ${AGENT_NET_DYNAMIC_RANGE:?set AGENT_NET_DYNAMIC_RANGE in .env}
   egress-net:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.28.11.0/24
+        - subnet: ${EGRESS_NET_SUBNET:?set EGRESS_NET_SUBNET in .env}
   obs-net:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.28.9.0/24
+        - subnet: ${OBS_NET_SUBNET:?set OBS_NET_SUBNET in .env}
 
 volumes:
   loki-data:

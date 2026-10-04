@@ -5,52 +5,192 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>cv-hermes</title>
   <style>
-    :root { --bg:#fafafa; --fg:#1a1a1a; --muted:#555; --accent:#2f6fdb; }
-    @media (prefers-color-scheme: dark) {
-      :root:not([data-theme="light"]) { --bg:#141414; --fg:#eaeaea; --muted:#9a9a9a; --accent:#7aa7ff; }
+    :root {
+      --bg:#f7f8fa; --panel:#ffffff; --fg:#1a1d24; --muted:#5c6470; --line:#d6dae1;
+      --accent:#2f6fdb; --ok:#1f8a4c; --warn:#b35c00; --box:#eef3fc;
     }
-    :root[data-theme="dark"] { --bg:#141414; --fg:#eaeaea; --muted:#9a9a9a; --accent:#7aa7ff; }
-    body { background:var(--bg); color:var(--fg); font:16px/1.6 system-ui,sans-serif; max-width:44em; margin:auto; padding:2em 1.25em; }
-    h1 { margin-bottom:.2em; }
-    .sub { color:var(--muted); margin-top:0; }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg:#11141a; --panel:#1a1f28; --fg:#e8ebf0; --muted:#9aa3b2; --line:#2d3441;
+        --accent:#7aa7ff; --ok:#5cc88a; --warn:#f0a35a; --box:#1f2a3d;
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg:#11141a; --panel:#1a1f28; --fg:#e8ebf0; --muted:#9aa3b2; --line:#2d3441;
+      --accent:#7aa7ff; --ok:#5cc88a; --warn:#f0a35a; --box:#1f2a3d;
+    }
+    * { box-sizing:border-box; }
+    body { background:var(--bg); color:var(--fg); font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif; margin:0; }
+    main { max-width:56em; margin:0 auto; padding:2.5em 1.25em 3em; }
+    h1 { margin:0 0 .2em; font-size:2.2em; letter-spacing:-.01em; }
+    h2 { margin:2em 0 .6em; font-size:1.35em; }
+    .sub { color:var(--muted); margin:0 0 1.2em; font-size:1.05em; }
     a { color:var(--accent); }
-    code { font-size:.92em; }
-    ul { padding-left:1.2em; }
+    code { font-size:.9em; background:var(--box); padding:.1em .35em; border-radius:4px; }
+    .badges { display:flex; flex-wrap:wrap; gap:.5em; margin:1em 0 0; }
+    .badge { font-size:.85em; padding:.3em .7em; border:1px solid var(--line); border-radius:999px; color:var(--muted); background:var(--panel); }
+    .badge.ok { color:var(--ok); border-color:var(--ok); }
+    .badge.warn { color:var(--warn); border-color:var(--warn); }
+    .grid { display:grid; gap:1em; grid-template-columns:repeat(auto-fit,minmax(14em,1fr)); }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:1.1em 1.2em; }
+    .card h3 { margin:0 0 .35em; font-size:1.02em; }
+    .card p { margin:0; color:var(--muted); font-size:.95em; }
+    .icon { width:2.2em; height:2.2em; margin-bottom:.5em; color:var(--accent); }
+    .diagram { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:1em; overflow-x:auto; }
+    .diagram svg { display:block; width:100%; height:auto; min-width:34em; }
+    .diagram text { fill:var(--fg); font:13px system-ui,sans-serif; }
+    .diagram .muted { fill:var(--muted); font-size:12px; }
+    .diagram .box { fill:var(--box); stroke:var(--accent); stroke-width:1.2; }
+    .diagram .safe { fill:none; stroke:var(--ok); stroke-width:1.4; stroke-dasharray:5 4; }
+    .diagram .deny { fill:none; stroke:var(--warn); stroke-width:1.4; stroke-dasharray:2 4; }
+    .diagram .arrow { stroke:var(--muted); stroke-width:1.4; fill:none; marker-end:url(#arr); }
+    .legend { display:flex; flex-wrap:wrap; gap:1.2em; margin:.8em 0 0; font-size:.9em; color:var(--muted); }
+    .legend span::before { content:""; display:inline-block; width:1.4em; height:0; border-top:2px solid; margin-right:.45em; vertical-align:middle; }
+    .legend .l-ok::before { border-color:var(--ok); border-top-style:dashed; }
+    .legend .l-deny::before { border-color:var(--warn); border-top-style:dotted; }
+    .legend .l-flow::before { border-color:var(--muted); }
+    .steps { counter-reset:step; list-style:none; padding:0; margin:0; display:grid; gap:.7em; }
+    .steps li { counter-increment:step; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:.8em 1em .8em 3.2em; position:relative; color:var(--fg); }
+    .steps li::before { content:counter(step); position:absolute; left:.9em; top:.75em; width:1.7em; height:1.7em; border-radius:50%; background:var(--accent); color:#fff; font-weight:700; display:flex; align-items:center; justify-content:center; font-size:.9em; }
+    .split { display:grid; gap:1em; grid-template-columns:repeat(auto-fit,minmax(18em,1fr)); }
+    .yes h3 { color:var(--ok); }
+    .no h3 { color:var(--warn); }
+    .panel-title { font-size:.8em; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin:0 0 .6em; }
+    footer { margin-top:2.5em; color:var(--muted); font-size:.9em; border-top:1px solid var(--line); padding-top:1em; }
   </style>
 </head>
 <body>
+<main>
   <h1>cv-hermes</h1>
-  <p class="sub">A cybersecurity learning lab built on the official Hermes Agent.</p>
+  <p class="sub">A cybersecurity learning lab built on the official Hermes Agent, for the OWASP Top 10 for LLM Applications.</p>
+  <div class="badges">
+    <span class="badge">Official Hermes image</span>
+    <span class="badge">Local models only</span>
+    <span class="badge ok">Egress restricted</span>
+    <span class="badge warn">Not air-gapped</span>
+  </div>
 
-  <p>
-    This project runs the official
-    <a href="https://hermes-agent.nousresearch.com/">Hermes Agent</a> image with its recommended settings,
-    in a controlled VM and Docker environment. The focus is the
-    <strong>OWASP Top 10 for LLM Applications</strong> (2025), the security risks specific to AI-powered systems.
-  </p>
+  <h2>How it fits together</h2>
+  <div class="diagram" role="img" aria-label="Diagram: the agent reaches Discord only through an egress proxy, uses a local model on the host, and sends logs to Grafana. All other outbound traffic is blocked.">
+    <svg viewBox="0 0 760 340" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
+        </marker>
+      </defs>
 
-  <h2>What it is</h2>
-  <ul>
-    <li>The official agent image, pinned, with its dashboard and API behind a login or key.</li>
-    <li>Discord as the chat interface. The bot's only internet hosts are <code>discord.com</code> and <code>gateway.discord.gg</code>, through an egress proxy.</li>
-    <li>A local model served by LM Studio. No cloud LLM provider.</li>
-    <li>Grafana and Loki for observing the agent's logs.</li>
-  </ul>
+      <!-- Trusted host -->
+      <rect x="20" y="20" width="520" height="300" rx="14" fill="none" stroke="var(--line)" stroke-width="1.2" stroke-dasharray="4 4"/>
+      <text x="34" y="42" class="muted">Lab VM (Docker)</text>
 
-  <h2>What it is not</h2>
-  <ul>
-    <li>Not air-gapped. The agent has two outbound hosts, and this is documented as an accepted risk.</li>
-    <li>Not yet a rogue-entity detector. That's designed (a separate read-only sensor) but not built.</li>
-  </ul>
+      <!-- Users -->
+      <rect x="40" y="150" width="120" height="56" rx="10" class="box"/>
+      <text x="100" y="175" text-anchor="middle">You</text>
+      <text x="100" y="193" text-anchor="middle" class="muted">dashboard · chat</text>
+
+      <!-- Agent -->
+      <rect x="210" y="130" width="150" height="96" rx="12" class="box"/>
+      <text x="285" y="160" text-anchor="middle" style="font-weight:700">Hermes agent</text>
+      <text x="285" y="180" text-anchor="middle" class="muted">official image</text>
+      <text x="285" y="198" text-anchor="middle" class="muted">unsandboxed terminal</text>
+
+      <!-- Proxy -->
+      <rect x="400" y="60" width="120" height="56" rx="10" class="box"/>
+      <text x="460" y="85" text-anchor="middle">Egress proxy</text>
+      <text x="460" y="103" text-anchor="middle" class="muted">2 hostnames only</text>
+
+      <!-- Logs -->
+      <rect x="400" y="230" width="120" height="56" rx="10" class="box"/>
+      <text x="460" y="255" text-anchor="middle">Logs → Grafana</text>
+      <text x="460" y="273" text-anchor="middle" class="muted">no internet route</text>
+
+      <!-- Local model (outside VM) -->
+      <rect x="590" y="150" width="150" height="56" rx="10" class="box" style="stroke:var(--ok)"/>
+      <text x="665" y="175" text-anchor="middle">Local model</text>
+      <text x="665" y="193" text-anchor="middle" class="muted">on the host machine</text>
+
+      <!-- Internet -->
+      <rect x="590" y="60" width="150" height="56" rx="10" fill="none" stroke="var(--muted)" stroke-dasharray="3 3"/>
+      <text x="665" y="85" text-anchor="middle" class="muted">Chat platform</text>
+      <text x="665" y="103" text-anchor="middle" class="muted">(allowlisted)</text>
+
+      <rect x="590" y="250" width="150" height="56" rx="10" fill="none" stroke="var(--warn)" stroke-dasharray="3 3"/>
+      <text x="665" y="275" text-anchor="middle" class="muted">Everything else</text>
+      <text x="665" y="293" text-anchor="middle" class="muted">blocked</text>
+
+      <!-- Flows -->
+      <path d="M160,178 L210,178" class="arrow"/>
+      <path d="M360,160 L400,100" class="arrow"/>
+      <path d="M520,88 L590,88" class="safe"/>
+      <path d="M360,200 L400,240" class="arrow"/>
+      <path d="M360,215 L590,265" class="deny"/>
+      <path d="M360,190 L590,178" class="safe"/>
+    </svg>
+  </div>
+  <div class="legend">
+    <span class="l-flow">Normal flow</span>
+    <span class="l-ok">Allowed route</span>
+    <span class="l-deny">Blocked route</span>
+  </div>
+
+  <h2>Design rules</h2>
+  <div class="grid">
+    <div class="card">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+      <h3>Credentials required</h3>
+      <p>The dashboard and the API both need a login or key. Nothing is open to the internet.</p>
+    </div>
+    <div class="card">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>
+      <h3>Egress restricted</h3>
+      <p>One proxy, two allowed hostnames, and every other outbound connection rejected at the host firewall.</p>
+    </div>
+    <div class="card">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+      <h3>Local models only</h3>
+      <p>The language model runs on a local machine. No cloud model provider is used.</p>
+    </div>
+    <div class="card">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 19V5M4 19h16"/><path d="M8 15l3-4 3 2 4-6"/></svg>
+      <h3>Observable</h3>
+      <p>Logs ship to Grafana, with no route out, so the dashboards stay inside the lab.</p>
+    </div>
+  </div>
+
+  <h2>Setup, at a glance</h2>
+  <ol class="steps">
+    <li>Create a VirtualBox VM and a private host-only network.</li>
+    <li>Run the provisioning script, which installs Docker and the firewall rules.</li>
+    <li>Load a local model in LM Studio on the host, with a 64K context.</li>
+    <li>Fill in the local environment files, then start the stack with Docker Compose.</li>
+    <li>Verify the egress checks and the chat reply.</li>
+  </ol>
+
+  <h2>What it can and can't do</h2>
+  <div class="split">
+    <div class="card yes">
+      <p class="panel-title">Does</p>
+      <h3>Chat with a local model</h3>
+      <p>Answers questions about the OWASP LLM risks, through Discord or the dashboard.</p>
+    </div>
+    <div class="card no">
+      <p class="panel-title">Doesn't yet</p>
+      <h3>Detect rogue entities</h3>
+      <p>Planned: a separate read-only sensor, not built yet.</p>
+    </div>
+  </div>
 
   <h2>Documentation</h2>
-  <ul>
-    <li><a href="https://github.com/cv-ai-sec/cv-hermes#readme">README</a></li>
-    <li><a href="https://github.com/cv-ai-sec/cv-hermes/blob/main/docs/ARCHITECTURE.md">Architecture</a></li>
-    <li><a href="https://github.com/cv-ai-sec/cv-hermes/blob/main/docs/SECURITY.md">Security and accepted risks</a></li>
-    <li><a href="https://github.com/cv-ai-sec/cv-hermes/blob/main/docs/INSTALL.md">Install</a></li>
-  </ul>
+  <div class="grid">
+    <div class="card"><h3><a href="https://github.com/cv-ai-sec/cv-hermes#readme">README</a></h3><p>Overview and focus.</p></div>
+    <div class="card"><h3><a href="https://github.com/cv-ai-sec/cv-hermes/blob/main/docs/ARCHITECTURE.md">Architecture</a></h3><p>How the pieces connect.</p></div>
+    <div class="card"><h3><a href="https://github.com/cv-ai-sec/cv-hermes/blob/main/docs/SECURITY.md">Security</a></h3><p>Rules and accepted risks.</p></div>
+    <div class="card"><h3><a href="https://github.com/cv-ai-sec/cv-hermes/blob/main/docs/INSTALL.md">Install</a></h3><p>Setup from scratch.</p></div>
+  </div>
 
-  <p class="sub">Educational and personal lab project. Not affiliated with Nous Research or Discord.</p>
+  <footer>
+    Educational and personal lab project. Not affiliated with Nous Research or Discord.
+  </footer>
+</main>
 </body>
 </html>

@@ -17,7 +17,7 @@ set -euo pipefail
 
 # --- Configuration you should check before running ---------------------------
 # The subnet allowed to reach Grafana. Defaults to VirtualBox's default host-only
-# network — the same adapter ai-cybersecurity-devops-lab uses — since
+# network, since
 # Grafana is meant to be reached via the VM's host-only IP, not a NAT port-forward (see
 # docs/INSTALL.md for why). Change this if your host-only network uses a different range,
 # or if you're reaching the VM over a bridged adapter/real LAN instead.
@@ -38,7 +38,7 @@ HERMES_DASHBOARD_PORT="${HERMES_DASHBOARD_PORT:-9119}"
 # agent-net that hermes-agent itself uses (that one DOES need outbound
 # internet, for Discord + the LLM API, so it is intentionally NOT blocked
 # here; this script only blocks the observability subnet).
-OBS_NET_SUBNET="${OBS_NET_SUBNET:-172.28.9.0/24}"
+OBS_NET_SUBNET="${OBS_NET_SUBNET:?set OBS_NET_SUBNET from .env}"
 # -------------------------------------------------------------------------------
 
 if [[ $EUID -ne 0 ]]; then

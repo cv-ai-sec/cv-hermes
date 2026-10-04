@@ -27,8 +27,8 @@ set -euo pipefail
 
 : "${LM_STUDIO_IP:?set LM_STUDIO_IP (HOST_LM_STUDIO_IP from .env)}"
 : "${EGRESS_PROXY_IP:?set EGRESS_PROXY_IP from .env}"
-AGENT_NET_SUBNET="172.28.10.0/24"
-EGRESS_NET_SUBNET="172.28.11.0/24"
+: "${AGENT_NET_SUBNET:?set AGENT_NET_SUBNET from .env}"
+: "${EGRESS_NET_SUBNET:?set EGRESS_NET_SUBNET from .env}"
 
 if [[ $EUID -ne 0 ]]; then
   echo "Run as root (sudo bash $0)" >&2

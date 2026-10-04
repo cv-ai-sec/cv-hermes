@@ -4,8 +4,7 @@ Hermes Agent is the official project by Nous Research: [hermes-agent.nousresearc
 For the agent's own setup concepts, see its [quickstart](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart).
 
 This guide runs the entire cv-hermes stack **inside a dedicated VirtualBox VM** running Rocky Linux
-9, using the same NAT + Host-only adapter pattern as this workspace's other lab
-([`ai-cybersecurity-devops-lab`](../ai-cybersecurity-devops-lab)) — one adapter for internet access
+9, using a NAT and a host-only adapter — one adapter for internet access
 (package installs, and the agent's Discord traffic through the egress proxy), one private host-only link to reach LM
 Studio running on the Windows host. Any hypervisor in the main [README.md](../README.md)'s spec
 table works in principle, but the network-adapter and port-forwarding steps below are
@@ -23,11 +22,11 @@ Download from virtualbox.org and install normally. The Extension Pack isn't requ
 
 ## 2. Create (or reuse) the host-only network
 
-If `ai-cybersecurity-devops-lab` is already set up on this machine, its host-only network already
-exists — reuse it rather than creating a second one. Otherwise:
+If another lab VM on this machine already uses a host-only network, reuse it rather than creating a second one.
+Otherwise:
 
 1. **File → Tools → Network Manager** (or **Host Network Manager** on older VirtualBox versions).
-2. Create a new **Host-only Network** if none exists (default name `vboxnet0`).
+2. Create a new **Host-only Network** if none exists.
 3. Note its IPv4 address and subnet. The address is the Windows host's address as seen from the VM,
    and it goes in `HOST_LM_STUDIO_IP`. The subnet goes in `LOCAL_SUBNET`. Use your actual values
    wherever `<host-only-subnet-cidr>` or `<windows-host-only-ip>` appears in these docs.
@@ -63,17 +62,14 @@ with the keyboard (`Tab`/`Space`/`Enter`/arrows) instead.
 
 | Name | Protocol | Host IP | Host Port | Guest IP | Guest Port |
 |---|---|---|---|---|---|
-| ssh | TCP | 127.0.0.1 | 2223 | (blank) | 22 |
+| ssh | TCP | 127.0.0.1 | `<ssh host port>` | (blank) | 22 |
 
-Host port **2223**, not **2222** — `ai-cybersecurity-devops-lab`'s VM already forwards `2222` to its
-own SSH; using a different port here lets both VMs run at the same time without a conflict
-(`ssh -p 2223 <user>@127.0.0.1` reaches this one, `ssh -p 2222 <user>@127.0.0.1` reaches the other).
+Pick a host port that no other VM on the machine uses, and record it in your local documentation.
+Two VMs can't share one forwarded port.
 
-**No Grafana port-forward rule** — deliberately. `ai-cybersecurity-devops-lab`'s install guide
-documents a confirmed VirtualBox NAT engine ("slirp") bug where certain HTTP responses through a
-NAT port-forward hang indefinitely; that project works around it by reaching its dashboard via the
-VM's host-only IP instead of a NAT-forwarded port, and this project uses the same approach for
-Grafana — see step 9.
+**No web port-forward rules.** Web services are reached on the VM's host-only address instead of a
+NAT-forwarded port. VirtualBox's NAT engine can hang on some HTTP responses through a port-forward, so
+this project avoids them.
 
 ## 5. Inside the VM: install Docker Engine and get the project
 
@@ -84,14 +80,14 @@ cd cv-hermes
 
 If you haven't pushed yet, use `scp` from Windows over the SSH port-forward instead (substitute your repo path):
 ```powershell
-scp -P 2223 -r "<path-to-cv-hermes>" <user>@127.0.0.1:~/
+scp -P <ssh host port> -r "<path-to-cv-hermes>" <user>@127.0.0.1:~/
 ```
 
 ## 6. Run the host provisioning script
 
 Set `LOCAL_SUBNET` to the VM's host-only subnet (the range from step 2, in CIDR form). The script
-requires it, with no default. `GRAFANA_PORT` (3000), `HERMES_API_PORT` (8642), and
-`HERMES_DASHBOARD_PORT` (9119) have defaults; change them only if one is taken.
+requires it, with no default. The Grafana, API, and dashboard ports have defaults in the script; change them
+only if one is taken, and keep the values you choose in your local documentation.
 
 ```bash
 export LOCAL_SUBNET=<host-only-subnet-cidr>
@@ -104,8 +100,8 @@ blocked). It also sets the SELinux boolean containers need under enforcing mode.
 
 Then apply the hermes-agent egress policy (step 9 covers when to run it).
 
-**Re-running on an older setup:** the script is safe to re-run. Rich rules for ports that are no
-longer used (8502, 8503, 8504) must be removed by hand. List them with
+**Re-running on an older setup:** the script is safe to re-run. Firewall rules for ports that are no
+longer used must be removed by hand. List them with
 `sudo firewall-cmd --list-rich-rules` and remove each with `--remove-rich-rule`. Record the change in
 `Projects\firewall-audit-log\CHANGELOG.md`.
 
@@ -133,7 +129,7 @@ one anyway.
    New-NetFirewallRule -DisplayName "LM Studio - VM only" -Direction Inbound -Protocol TCP `
      -LocalPort 1234 -RemoteAddress <host-only-subnet-cidr> -Action Allow
    ```
-   (Run as Administrator. Replace `<host-only-subnet-cidr>` with your host-only network's range. Skip this if you already added it for `ai-cybersecurity-devops-lab` — one rule covers
+   (Run as Administrator. Replace `<host-only-subnet-cidr>` with your host-only network's range. Skip this if a rule for that subnet already exists — one rule covers
    both, since both VMs sit on the same host-only subnet.)
 
    **Don't also add a second "block everyone else" rule.** An earlier version of this guide did,
@@ -252,6 +248,9 @@ proxy to the Discord hosts. Run after `docker compose up -d` has created the net
 ```bash
 export LM_STUDIO_IP=<HOST_LM_STUDIO_IP from .env>
 export EGRESS_PROXY_IP=<EGRESS_PROXY_IP from .env>
+export AGENT_NET_SUBNET=<AGENT_NET_SUBNET from .env>
+export EGRESS_NET_SUBNET=<EGRESS_NET_SUBNET from .env>
+export OBS_NET_SUBNET=<OBS_NET_SUBNET from .env>
 sudo -E bash scripts/01_apply_hermes_egress_policy.sh
 sudo systemctl restart docker
 docker compose up -d
@@ -274,9 +273,8 @@ docker compose exec grafana curl -m 3 -sS https://8.8.8.8
 
 Find the VM's host-only IP on the VM with `ip -4 addr show`. From a machine on `LOCAL_SUBNET`:
 
-- `http://<VM host-only IP>:9119`: the Hermes dashboard (login required).
-- `http://<VM host-only IP>:3000`: Grafana. The Hermes health panels show no data until Promtail
-  is updated (see `Projects\cv-hermes-audit-log\CHANGELOG.md`).
+- `http://<VM host-only IP>:<dashboard port>`: the Hermes dashboard (login required).
+- `http://<VM host-only IP>:<Grafana port>`: Grafana.
 Log in with `GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD` from `.env`. The **Hermes Agent Overview**
 dashboard is auto-provisioned.
 
@@ -307,12 +305,11 @@ dashboard is auto-provisioned.
 - **Agent replies with a context-window error (below 64,000 tokens):** Hermes requires at least 64,000.
   Reload the model in LM Studio with Context Length 65536 (see `system-audit-log/EXTERNAL-SERVICES.md`).
 - **Can't reach Grafana from Windows at all:** confirm you're using the VM's host-only IP (step 10),
-  not `127.0.0.1` — there's no NAT port-forward for Grafana by design (step 4). Also re-check
-  `sudo firewall-cmd --list-rich-rules` on the VM includes the Grafana allow rule for your actual
-  `LOCAL_SUBNET`.
-- **SSH (`ssh -p 2223 ...`) fails with `kex_exchange_identification: read: Connection reset`:** the
-  TCP connection succeeded but nothing spoke SSH back — check the port-forward rule's guest port is
-  `22` (not `2223`), confirm `sudo systemctl status sshd` is active inside the VM.
+  not `127.0.0.1` — there's no NAT port-forward for Grafana by design (step 4). Also re-check the
+  firewall rules on the VM include the Grafana allow rule for your actual `LOCAL_SUBNET`.
+- **SSH fails with `kex_exchange_identification: read: Connection reset`:** the TCP connection succeeded
+  but nothing spoke SSH back — check the port-forward rule's guest port is `22`, and confirm
+  `sudo systemctl status sshd` is active inside the VM.
 - **SELinux denials in `/var/log/audit/audit.log` when a container tries to read a mounted
   config/volume:** confirm the volume's compose entry still has its `:Z` suffix (e.g.
   `./workspace:/workspace:Z`) — removing it is the most common way this regresses.

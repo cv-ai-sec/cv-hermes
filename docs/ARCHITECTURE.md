@@ -1,70 +1,59 @@
 # Architecture
 
-This project runs the official [Hermes Agent](https://hermes-agent.nousresearch.com/) image, configured with
-the recommended settings, for learning the OWASP Top 10 for LLM Applications in a controlled VM and Docker lab.
-Setup concepts are in the [quickstart](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart).
+This project runs the official [Hermes Agent](https://hermes-agent.nousresearch.com/) container image, configured
+with its recommended settings, in a controlled virtual machine with Docker. It is a learning lab for the OWASP
+Top 10 for LLM Applications.
 
 ## Components
 
-```
-Browser / Discord  --->  VM host-only address (192.168.56.x)
-                           :9119 dashboard   :8642 API   :3000 Grafana
-                              |
-   Windows host                |
-   LM Studio :1234 <---+  hermes-agent  ---HTTPS_PROXY--->  egress-proxy  ---443--->  discord.com
-   (local models)      |      (agent-net)                    (agent-net +             gateway.discord.gg
-                       +------ direct tcp/1234              egress-net)
+| Component | Role |
+|---|---|
+| Agent | The official Hermes Agent container. Handles the chat interface, dashboard, and API. |
+| Egress proxy | The agent's only route to the internet. Allows a short list of hostnames. |
+| Language model | Served by LM Studio on the host machine. Local only. |
+| Logging | The agent's log files are shipped to a log store and viewed in Grafana. |
 
-   Promtail --> Loki --> Grafana          (obs-net, no internet)
-```
+## Network layout
 
-| Container | Image | Role |
-|---|---|---|
-| `hermes-agent` | `nousresearch/hermes-agent` (pinned) | The agent: Discord gateway, dashboard, API, tools |
-| `egress-proxy` | `ubuntu/squid` (pinned) | Only route out for the agent. Allows two Discord hostnames. |
-| `loki`, `promtail`, `grafana` | Grafana stack (pinned) | Log storage, shipping, and dashboards. No internet. |
+- The agent and the egress proxy share an internal network. The proxy holds a fixed address, and the agent's
+  addresses come from a separate range, so the two never collide.
+- The proxy has a second network for its own outbound traffic.
+- The logging stack sits on its own internal network, with no internet route.
+- The agent's own outbound traffic is limited to the proxy and the local model server. Everything else is
+  rejected by the host firewall.
 
-## Networks
-
-| Network | Subnet | Purpose |
-|---|---|---|
-| `agent-net` | `172.28.10.0/24` (dynamic addresses in `.128/25`) | Agent and proxy. The proxy is reserved at `172.28.10.2`. |
-| `egress-net` | `172.28.11.0/24` | The proxy's outbound side |
-| `obs-net` | `172.28.9.0/24` | Loki, Promtail, Grafana |
-
-The proxy address is reserved because a reboot once let the agent take it. Restricting dynamic addresses to the
-upper half of the subnet prevents a repeat.
+Addresses and subnets are kept in local documentation, not here.
 
 ## Traffic rules
 
-- **Agent outbound:** allowed only to the proxy (`:3128`) and LM Studio (`:1234`). Everything else is rejected.
-- **Proxy outbound:** allowed on 443 and DNS, and the proxy itself only tunnels to the two allowlisted hostnames.
-- **Observability:** no outbound route at all.
-- **Enforcement:** `DOCKER-USER` iptables chain, applied at boot by `hermes-egress.service`
-  (`scripts/02_apply_docker_user_rules.sh`). The firewalld direct rules in `scripts/01_*` are a record only.
-  Docker evaluates `DOCKER-USER` before its own forwarding accepts, which is why it is used.
+- **Agent outbound:** the proxy and the local model server only.
+- **Proxy outbound:** allowed hostnames only, on the secure web port.
+- **Logging stack:** no outbound route.
+- **Enforcement:** host firewall rules, applied at boot by a system service. Container networks can bypass
+  some firewall rules by default, so the rules are placed where the container runtime evaluates them first.
 
 ## Logging
 
-The official image writes plain-text logs under `hermes-data/logs/`. Promtail reads them read-only as the
-agent's UID and ships them to Loki. Grafana queries Loki with `{job="hermes-agent"}`.
+The agent writes plain-text logs to a folder on the VM. A log shipper reads them read-only and sends them to
+the log store. Grafana queries the log store. Logs can contain chat content, so they stay inside the lab.
 
 ## Trust boundaries
 
-- **Secrets:** the agent reads its secrets from `hermes-data/.env` inside the container. The compose `.env`
-  holds only addresses and ports.
-- **Local models only:** LM Studio on the Windows host is the only LLM. No cloud provider is configured.
-- **Dashboard and API:** both require login or a key, and are reachable only from the lab subnet.
-- **The agent's terminal:** `terminal.backend: local`, so commands run inside the agent container without a
-  sandbox. This is an accepted risk, see [SECURITY.md](SECURITY.md).
+- **Secrets:** the agent reads its credentials from a local file inside its container. The compose file holds
+  placeholders only.
+- **Local models only:** the model runs on the host machine. No cloud provider is configured.
+- **Dashboard and API:** both require credentials and are reachable only from the lab network.
+- **The agent's terminal:** unsandboxed, so commands run inside the container without extra isolation. This is
+  an accepted risk; see [SECURITY.md](SECURITY.md).
 
-## Planned: rogue-entity detection (not built)
+## Planned: detection of unauthorized entities (not built)
 
-Hermes never scans the network itself. A separate read-only sensor will run discovery on an allowlisted lab
-subnet and write schema-validated findings to a volume the agent reads.
+A separate, read-only sensor will scan an allowlisted part of the lab network and write structured findings to a
+location the agent can read. The agent will not scan the network itself.
 
-- The sensor has its own firewall scope and no route to the LLM or the internet.
-- Findings are structured JSON. Hostnames and banners are untrusted data (indirect prompt injection, LLM01).
-- On-demand scans go through a controller that checks an allowlist, not directly from the agent.
+- The sensor has its own firewall scope and no route to the model server or the internet.
+- Findings are structured data. Names and banners from scanned devices are untrusted, and the agent treats them
+  as data, not instructions.
+- Scans the agent requests go through a controller that checks an allowlist first.
 - Trade-off: no real-time probing. The agent works from the latest completed scan.
-- Adding the sensor requires a firewall change, logged in the firewall audit log before it's applied.
+- Adding the sensor requires a firewall change, recorded in the local audit log before it is applied.

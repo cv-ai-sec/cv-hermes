@@ -8,15 +8,16 @@
 # The chain is owned entirely by this script, so it is flushed and rebuilt on every run.
 # Required environment (from /etc/hermes-egress.env, root-only, never committed):
 #   LM_STUDIO_IP    -- Windows host's host-only address
-#   EGRESS_PROXY_IP -- the proxy's address in agent-net (172.28.10.2)
+#   EGRESS_PROXY_IP -- the proxy's address in agent-net
+#   AGENT_NET_SUBNET, EGRESS_NET_SUBNET, OBS_NET_SUBNET -- the lab networks (from .env)
 
 set -euo pipefail
 
 : "${LM_STUDIO_IP:?set LM_STUDIO_IP in /etc/hermes-egress.env}"
 : "${EGRESS_PROXY_IP:?set EGRESS_PROXY_IP in /etc/hermes-egress.env}"
-AGENT_NET_SUBNET="172.28.10.0/24"
-EGRESS_NET_SUBNET="172.28.11.0/24"
-OBS_NET_SUBNET="172.28.9.0/24"
+: "${AGENT_NET_SUBNET:?set AGENT_NET_SUBNET in /etc/hermes-egress.env}"
+: "${EGRESS_NET_SUBNET:?set EGRESS_NET_SUBNET in /etc/hermes-egress.env}"
+: "${OBS_NET_SUBNET:?set OBS_NET_SUBNET in /etc/hermes-egress.env}"
 
 ipt() { /usr/sbin/iptables -w "$@"; }
 
