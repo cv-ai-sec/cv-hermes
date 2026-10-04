@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Restricts what the hermes-agent network can reach from the VM, using firewalld direct rules
-# in the DOCKER-USER chain (container traffic to the outside is forwarded through the host).
+# in the FORWARD chain. The enforcing rules are in DOCKER-USER: see scripts/02_apply_docker_user_rules.sh.
 #
 #   agent-net (hermes-agent) may reach ONLY:
 #     - the egress proxy on tcp/3128
@@ -35,9 +35,11 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
-# DOCKER-USER, not FORWARD: restarting Docker rebuilds its own FORWARD rules above firewalld's,
-# and they would accept agent traffic before these rejects run. DOCKER-USER is evaluated first and survives.
-direct() { firewall-cmd --permanent --direct --add-rule ipv4 filter DOCKER-USER "$@"; }
+# These rules sit in FORWARD, which Docker's own accepts run ahead of, so they do not stop
+# agent traffic on their own. The enforcing copy is in DOCKER-USER, applied by
+# scripts/02_apply_docker_user_rules.sh at boot. firewalld cannot manage DOCKER-USER here:
+# referencing it in a direct rule breaks firewalld's reload.
+direct() { firewall-cmd --permanent --direct --add-rule ipv4 filter FORWARD "$@"; }
 
 # Replies to connections that were already allowed. Without this, the rejects below would block
 # the proxy's and LM Studio's responses.
