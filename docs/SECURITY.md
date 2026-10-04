@@ -6,7 +6,7 @@ or what the agent can do.
 
 ## Design rules
 
-- **The agent is not air-gapped.** It can reach a small allowlist of hosts through a proxy, and nothing else.
+- **Outbound access is allowlisted.** The agent can reach a short list of hosts through a proxy, and nothing else.
   Everything outside the allowlist is blocked at the host firewall, not just by configuration.
 - **Local models only.** The language model runs on a local machine. Cloud model providers are not permitted.
   Setup must not sign in to a hosted account. Adding a provider requires a documented change to these rules.

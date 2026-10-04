@@ -14,8 +14,10 @@ disclosure, supply chain, data and model poisoning, improper output handling, ex
 leakage, vector and embedding weaknesses, misinformation and overreliance, and unbounded consumption.
 The classic web OWASP Top 10 is out of scope.
 
-A planned addition is detection of unauthorized entities on the lab network, such as rogue MCP servers and
-unknown agents. It is designed but not built.
+## Role
+
+The agent is a learning companion for the labs. It explains findings and simulations, answers questions about
+the lab, and guides you through each exercise. Every action it takes goes through you.
 
 ## What runs
 
@@ -25,8 +27,8 @@ unknown agents. It is designed but not built.
 - A local language model served by LM Studio on the host machine. No cloud model provider is used.
 - Grafana and Loki for observing the agent's logs. They have no internet route.
 
-This is **not** an air-gapped environment. The agent reaches two outside hosts through the proxy.
-The security rules and accepted risks are in [docs/SECURITY.md](docs/SECURITY.md).
+Outbound access is limited to a short allowlist through the proxy. The security rules are in
+[docs/SECURITY.md](docs/SECURITY.md).
 
 ## Documentation
 

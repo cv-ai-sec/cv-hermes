@@ -46,14 +46,3 @@ the log store. Grafana queries the log store. Logs can contain chat content, so 
 - **The agent's terminal:** unsandboxed, so commands run inside the container without extra isolation. This is
   an accepted risk; see [SECURITY.md](SECURITY.md).
 
-## Planned: detection of unauthorized entities (not built)
-
-A separate, read-only sensor will scan an allowlisted part of the lab network and write structured findings to a
-location the agent can read. The agent will not scan the network itself.
-
-- The sensor has its own firewall scope and no route to the model server or the internet.
-- Findings are structured data. Names and banners from scanned devices are untrusted, and the agent treats them
-  as data, not instructions.
-- Scans the agent requests go through a controller that checks an allowlist first.
-- Trade-off: no real-time probing. The agent works from the latest completed scan.
-- Adding the sensor requires a firewall change, recorded in the local audit log before it is applied.
