@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Restricts what the hermes-agent network can reach from the VM, using firewalld direct rules
-# in the FORWARD chain (container traffic to the outside is forwarded through the host).
+# in the DOCKER-USER chain (container traffic to the outside is forwarded through the host).
 #
 #   agent-net (hermes-agent) may reach ONLY:
 #     - the egress proxy on tcp/3128
@@ -35,7 +35,9 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
-direct() { firewall-cmd --permanent --direct --add-rule ipv4 filter FORWARD "$@"; }
+# DOCKER-USER, not FORWARD: restarting Docker rebuilds its own FORWARD rules above firewalld's,
+# and they would accept agent traffic before these rejects run. DOCKER-USER is evaluated first and survives.
+direct() { firewall-cmd --permanent --direct --add-rule ipv4 filter DOCKER-USER "$@"; }
 
 # Replies to connections that were already allowed. Without this, the rejects below would block
 # the proxy's and LM Studio's responses.
