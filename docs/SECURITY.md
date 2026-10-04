@@ -11,6 +11,8 @@ not just on the first commit.
   host-only network (`tcp/1234`). No cloud LLM provider (OpenAI, Anthropic, and similar) is
   permitted. Adding one requires a new audit-log entry, a change to the egress allowlist, and an
   update to this section.
+  Enforced at setup: the agent wizard must be run in **Full setup** mode, not Quick Setup (which
+  signs in to the Nous Portal). After setup, `hermes-data/config.yaml` is checked for cloud-provider entries.
 - **Not air-gapped. Network-restricted.** The VM is not an air-gapped environment. The hermes-agent
   needs two internet hosts (`discord.com` and `gateway.discord.gg`), and the VM keeps a NAT adapter
   for installs. Restrictions apply in layers:

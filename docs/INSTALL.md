@@ -169,8 +169,26 @@ Configure the LLM with the agent's setup wizard, which writes its config into `h
 docker run -it --rm -v "$PWD/hermes-data:/opt/data" nousresearch/hermes-agent:v2026.9.24 setup
 ```
 
-Choose a custom OpenAI-compatible endpoint and set the base URL to LM Studio on the Windows host
-(`HOST_LM_STUDIO_IP`, port 1234, `/v1`). The model is the one loaded in LM Studio.
+The wizard offers three setup modes. Choose **Full setup** (the second option):
+
+- **Do not choose Quick Setup.** It signs in to the Nous Portal and uses a hosted model, which this
+  build does not allow.
+- **Blank Slate** leaves out what this build needs. Full setup is the one that lets you pick a
+  custom endpoint and skip hosted providers.
+
+In Full setup, pick the custom OpenAI-compatible endpoint:
+- Base URL: `http://<HOST_LM_STUDIO_IP>:1234/v1`, using the Windows host-only address from your compose
+  `.env`. Don't use `host.docker.internal` or `127.0.0.1` here. The wizard runs with a plain `docker run`,
+  which doesn't get the compose file's name mapping, and `127.0.0.1` is the container itself.
+- Model: the exact ID LM Studio shows for `qwen/qwen2.5-vl-7b`
+- API key: `lm-studio` (LM Studio ignores it; it's a placeholder)
+
+Skip any hosted provider, OAuth, or Nous Portal prompt. Leave tools and messaging at the defaults,
+since only Discord is in this build.
+
+After the wizard exits, check the generated `hermes-data/config.yaml` for any Nous Portal or
+cloud-provider entry. If you find one, remove it before starting the stack, or stop and report it.
+The file is git-ignored and must never be committed.
 
 Start the stack:
 
