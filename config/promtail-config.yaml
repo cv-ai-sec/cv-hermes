@@ -17,3 +17,18 @@ scrape_configs:
         labels:
           job: hermes-agent
           __path__: /var/log/hermes/logs/*.log
+
+  # One sanitized JSON line per session, written by scripts/session_summary.py. Only the platform is a
+  # label; session IDs stay as fields so they don't multiply Loki's stream count.
+  - job_name: hermes-sessions
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: hermes-sessions
+          __path__: /var/log/hermes/logs/sessions-summary.jsonl
+    pipeline_stages:
+      - json:
+          expressions:
+            platform: platform
+      - labels:
+          platform:
