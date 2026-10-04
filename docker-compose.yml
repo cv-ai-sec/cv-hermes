@@ -12,10 +12,11 @@ services:
     # foreground, -Y and -C match the image's default, and -d 1 sets log verbosity.
     command: ["-NYCd", "1"]
     read_only: true
+    # Squid runs as the "proxy" user after startup, so its runtime directories must be writable by it.
     tmpfs:
-      - /var/run/squid
-      - /var/spool/squid
-      - /var/log/squid
+      - /var/run/squid:mode=1777
+      - /var/spool/squid:mode=1777
+      - /var/log/squid:mode=1777
     cap_drop:
       - ALL
     cap_add:
