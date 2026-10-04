@@ -136,6 +136,9 @@ networks:
     ipam:
       config:
         - subnet: 172.28.10.0/24
+          # Dynamic addresses come only from the upper half, so the egress proxy's fixed
+          # 172.28.10.2 can't be taken by the agent when containers restart in a different order.
+          ip_range: 172.28.10.128/25
   egress-net:
     driver: bridge
     ipam:
