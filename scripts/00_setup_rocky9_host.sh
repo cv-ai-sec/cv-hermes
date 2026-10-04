@@ -98,7 +98,7 @@ firewall-cmd --permanent --zone=public --remove-port="${HERMES_DASHBOARD_PORT}/t
 # reach the internet — block its egress outright at the host firewall rather
 # than relying on Docker network config alone (Docker's `internal: true`
 # would also break Grafana's published port, which we need; see this
-# workspace's standing CLAUDE.md rule on air-gapped container labs for why
+# workspace's standing CLAUDE.md rule on isolated container labs for why
 # that flag is avoided here).
 firewall-cmd --permanent --direct --add-rule ipv4 filter FORWARD 0 \
   -s "${OBS_NET_SUBNET}" -j REJECT

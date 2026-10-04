@@ -6,7 +6,7 @@ For the agent's own setup concepts, see its [quickstart](https://hermes-agent.no
 This guide runs the entire cv-hermes stack **inside a dedicated VirtualBox VM** running Rocky Linux
 9, using the same NAT + Host-only adapter pattern as this workspace's other lab
 ([`ai-cybersecurity-devops-lab`](../ai-cybersecurity-devops-lab)) — one adapter for internet access
-(Discord, package installs, optionally a cloud LLM API), one private host-only link to reach LM
+(package installs, and the agent's Discord traffic through the egress proxy), one private host-only link to reach LM
 Studio running on the Windows host. Any hypervisor in the main [README.md](../README.md)'s spec
 table works in principle, but the network-adapter and port-forwarding steps below are
 VirtualBox-specific.
@@ -43,9 +43,9 @@ Sizing per the main README's spec table:
 - **Disk:** 50 GB, dynamically allocated (VDI)
 
 **Network adapters (Settings → Network):**
-- **Adapter 1: NAT** — internet access for package installs (`dnf`, `docker pull`) and for
-  hermes-agent's own outbound traffic to Discord (and a cloud LLM API, if you use one instead of a
-  local model).
+- **Adapter 1: NAT** — internet access for package installs (`dnf`, `docker pull`). Disable it after
+  install (see `Projects\system-audit-log`). The agent's Discord traffic goes through the egress proxy,
+  not this adapter.
 - **Adapter 2: Host-only Adapter** → select the network from step 2 — this is how the VM reaches LM
   Studio on Windows.
 
@@ -143,6 +143,51 @@ one anyway.
    above, since `Any` includes your host-only subnet too. The single Allow rule is sufficient on its
    own: Windows Firewall already denies everything not explicitly allowed. Full incident writeup
    in this workspace's local-only `Projects\firewall-audit-log\CHANGELOG.md`.
+
+### Local model configuration (size the context to your GPU)
+
+Hermes requires a context window of **at least 64,000 tokens**, and the loaded model must actually serve it.
+That context is the main cost on your GPU, so size the model and its settings together.
+
+**Memory needed** is roughly:
+
+> weights (model file size) + KV cache at your context + about 1 GB overhead
+
+- **Weights:** the GGUF file size shown in LM Studio, for example about 4.7 GB for a 7B Q4_K_M model.
+- **KV cache at 64K context:** about `2 × layers × KV heads × head size × bytes per value × 65,536`.
+  Read `layers`, `num_key_value_heads`, and `head_dim` from the model's `config.json`. Bytes per value are
+  2 for fp16 (the default), and 1 for Q8_0 cache quantization (roughly half the memory).
+- For Qwen2.5-7B (28 layers, 4 KV heads, head size 128): about 3.7 GB at fp16, about 1.9 GB at Q8_0.
+
+**Settings in LM Studio**, in the model's load dialog:
+
+| Setting | Value | Why |
+|---|---|---|
+| Context Length | `65536` | Meets Hermes's 64,000 minimum |
+| GPU Offload | all layers (the model's layer count) | Keeps the work on the GPU |
+| Flash Attention | on | Required for V cache quantization |
+| K Cache Quantization | `Q8_0` | Halves the cache |
+| V Cache Quantization | `Q8_0` | Halves the cache |
+
+**Choose by GPU VRAM** (estimates, verify with LM Studio's memory readout after loading):
+
+| GPU VRAM | Suggested model and settings |
+|---|---|
+| 8 GB | 7B Q4_K_M, 64K context, Q8_0 K and V cache. About 6–7 GB total. This is the current setup on an RTX 3070. |
+| 12 GB | 7B Q4_K_M, 64K context, fp16 cache may fit. Otherwise keep Q8_0. |
+| 16 GB and up | 7B or 8B Q5/Q6 at 64K context. Check the total before loading. |
+| Under 8 GB | Use a 3–4B model at 64K context. Confirm the model's native context first: a model that only serves 32K can't meet the minimum without extra configuration. |
+
+**Check after any change:**
+1. Load the model with the settings above, then check GPU memory in Task Manager. It should stay below your VRAM.
+2. Confirm the served context: a request that's larger than 8K tokens must succeed. A "context window below
+   minimum" error means the context is still too small.
+3. Measure speed: a short reply should take a few seconds. If it takes a minute, part of the model is
+   running from system RAM. Check that both RAM channels are used and that XMP is enabled, as RAM bandwidth
+   limits that spill.
+
+**Record the settings** for each model and machine in `Projects\system-audit-log\EXTERNAL-SERVICES.md`, so a
+future reload gets the same configuration.
 
 ## 8. Configure environment and bring up the stack
 
@@ -247,46 +292,20 @@ dashboard is auto-provisioned.
   allows the host-only subnet (step 7.5), and `HOST_LM_STUDIO_IP` in `.env` matches the host-only
   adapter's actual IP — then recreate the container so the `extra_hosts` mapping picks up the
   change: `docker compose up -d --force-recreate hermes-agent`.
-- **Grafana shows "no data" on every panel:** check Promtail is actually shipping lines —
-  `docker compose logs promtail` — and that `hermes-agent` has written anything to
-  `/var/log/hermes/hermes.jsonl` yet (`docker compose exec hermes-agent cat /var/log/hermes/hermes.jsonl`).
-  If the file is empty, send the bot a message in Discord first, then check again. If lines exist
-  but panels are still empty, validate the schema:
-  `docker compose exec hermes-agent python -m scripts.parse_metrics /var/log/hermes/hermes.jsonl`.
+- **Grafana shows no agent logs:** check `docker compose logs --tail 5 promtail` shows no permission
+  errors, and that Loki has the `hermes-agent` job:
+  `docker run --rm --network cv-hermes_obs-net --entrypoint sh nousresearch/hermes-agent:v2026.9.24 -c 'curl -s "http://loki:3100/loki/api/v1/label/job/values"; echo'`.
 - **Bot never responds in Discord, no errors in logs:** confirm the bot has "Message Content
   Intent" enabled in the Discord Developer Portal (**Bot → Privileged Gateway Intents**) — without
   it, `discord.py` silently receives messages with empty `content`.
-- **`hermes-agent` fails to start with a permission error writing to `/app/notes` or `/app/data`:**
-  the bind-mounted host directories (`./notes`, `./data`) need to be writable by the container's
-  non-root UID (`10001`). If `docker compose up` created them as root on first run, fix ownership:
-  `sudo chown -R 10001:10001 notes data workspace` (the same issue can affect `./workspace` for the
-  same reason).
-- **`summarize <url>` replies `[Task Failed] No 'en' transcript/captions available`:** this is
-  expected for audio-only videos or ones without English captions — Whisper-based transcription for
-  that case isn't implemented yet (see `docs/ARCHITECTURE.md`). Try a video with existing captions to
-  confirm the pipeline itself works.
-- **`summarize <url>` replies the generic `[Task Failed] Could not fetch transcript`** (not the
-  specific "no transcript" message above), and `docker compose logs hermes-agent` shows a `yt-dlp`
-  error like `Requested format is not available`: this is `yt-dlp` itself being out of date against
-  YouTube's current extraction internals, unrelated to this project's own code — confirmed live, not
-  hypothetical (`requirements.txt` deliberately leaves `yt-dlp` unpinned for exactly this reason).
-  Force a fresh install of the latest release:
-  ```bash
-  docker compose build --no-cache hermes-agent
-  docker compose up -d
-  ```
-- **`summarize <url>` replies `[Task #N Failed] Note generation failed`**, and the logs show an
-  `exceeds the available context size` error from the LLM: the video's transcript is longer than
-  the loaded model's context window can handle alongside the note-generation prompt and response.
-  Two fixes, not mutually exclusive:
-  1. `NotesService` already truncates transcripts to `MAX_TRANSCRIPT_CHARS` (default `20000`) to
-     avoid this — if it still happens, your loaded model's context window is smaller than the
-     default assumes; lower `MAX_TRANSCRIPT_CHARS` in `.env`, or
-  2. increase the model's actual context window in LM Studio (**Developer tab → the loaded
-     model's settings → Context Length**) if your hardware/model supports more than 8K, then raise
-     `MAX_TRANSCRIPT_CHARS` to match. Either way, a truncated transcript produces a note covering
-     only the start of the video, not a silent failure — the generated `.md` file says so explicitly
-     when it happens.
+- **`hermes-agent` can't read or write `hermes-data/`:** the folder belongs to UID `10000`, the official
+  image's user. Restore that ownership with `sudo chown -R 10000:10000 hermes-data` (keep your admin access
+  through an ACL if you need it, as set up on the VM).
+- **Agent replies "LM Studio rejected your API key" or shows `auth rejected`:** the request is going
+  through the egress proxy and getting Squid's 403, not LM Studio's response. Confirm `NO_PROXY` in the
+  compose file includes the Windows host address, then `docker compose up -d hermes-agent`.
+- **Agent replies with a context-window error (below 64,000 tokens):** Hermes requires at least 64,000.
+  Reload the model in LM Studio with Context Length 65536 (see `system-audit-log/EXTERNAL-SERVICES.md`).
 - **Can't reach Grafana from Windows at all:** confirm you're using the VM's host-only IP (step 10),
   not `127.0.0.1` — there's no NAT port-forward for Grafana by design (step 4). Also re-check
   `sudo firewall-cmd --list-rich-rules` on the VM includes the Grafana allow rule for your actual
