@@ -26,6 +26,11 @@ ipt -F DOCKER-USER
 ipt -A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 ipt -A DOCKER-USER -s "$AGENT_NET_SUBNET" -d "$EGRESS_PROXY_IP" -p tcp --dport 3128 -j ACCEPT
 ipt -A DOCKER-USER -s "$AGENT_NET_SUBNET" -d "$LM_STUDIO_IP" -p tcp --dport 1234 -j ACCEPT
+# The proxy's upstream connections leave through its agent-net address, so this allows only that
+# address to reach 443 and DNS. The agent's own containers stay rejected below.
+ipt -A DOCKER-USER -s "$EGRESS_PROXY_IP" -p tcp --dport 443 -j ACCEPT
+ipt -A DOCKER-USER -s "$EGRESS_PROXY_IP" -p udp --dport 53 -j ACCEPT
+ipt -A DOCKER-USER -s "$EGRESS_PROXY_IP" -p tcp --dport 53 -j ACCEPT
 ipt -A DOCKER-USER -s "$AGENT_NET_SUBNET" -j REJECT
 ipt -A DOCKER-USER -s "$EGRESS_NET_SUBNET" -p tcp --dport 443 -j ACCEPT
 ipt -A DOCKER-USER -s "$EGRESS_NET_SUBNET" -p udp --dport 53 -j ACCEPT
