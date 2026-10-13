@@ -1,0 +1,40 @@
+# --- Secrets and environment ---
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+keys/
+
+# --- Runtime data, logs, sessions, caches ---
+*.log
+logs/
+data/*
+*-data/*
+!*-data/*.example
+workspace/*
+notes/*
+
+# --- Private buildout, tooling, and records: kept outside this repository ---
+infra/
+config/
+scripts/
+dashboards/
+docker-compose*.yml
+*kill*
+*summary*
+*[Rr][Ee][Ss][Tt][Rr][Ii][Cc][Tt][Ee][Dd]*
+
+# --- Leftovers and caches ---
+*.old
+*.bak
+*.orig
+*~
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
